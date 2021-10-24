@@ -1071,7 +1071,7 @@ def main():
     parser.add_argument('--vcredist64', help='Path to Microsoft Visual C++ Redistributable x64')
     parser.add_argument('--no-vcredist', action='store_true', help='Do not include Visual C++ Redistributable')
     parser.add_argument('--msys-root', help='Msys root')
-    parser.add_argument('--msystem', choices=['MINGW32', 'MINGW64', 'UCRT64', 'CLANG64', 'MSYS2'], help='Msys root')
+    parser.add_argument('--msystem', choices=['MINGW32', 'MINGW64', 'UCRT64', 'CLANG64', 'MSYS2'], help='msystem')
 
     parser.add_argument('--version-header', help='Path to version.h (including name)')
     parser.add_argument('--src', help='Path to sources')
