@@ -611,7 +611,10 @@ def resolve_binaries(logger, config):
         config['bin'] += helpers
 
     pool = BinariesPool(binaries, resolver, logger)
-    return pool.binaries(), ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt_gui=is_qt_gui, vcruntime=pool.vcruntime(), gtk=is_gtk)
+
+    meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt_gui=is_qt_gui, vcruntime=pool.vcruntime(), gtk=is_gtk)
+    debug_print(meta)
+    return pool.binaries(), meta
 
 def bump_version(config, args, logger):
 
