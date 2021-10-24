@@ -450,6 +450,8 @@ def update_config(config, args):
     if args.version_header:
         config['version-header'] = args.version_header
 
+    config['no_vcredist'] = args.no_vcredist
+
     if args.data is not None:
 
         items = []
@@ -759,7 +761,7 @@ def inno_script(config, logger, binaries, meta):
             'Tasks': 'desktopicon'
         })
 
-    if meta.vcruntime:
+    if meta.vcruntime and config['no_vcredist'] == False:
 
         if meta.amd64:
             vcredist = config['vcredist64']
@@ -882,7 +884,7 @@ def collect(config, logger, binaries, meta, dry_run):
                 dest = os.path.join(base, os.path.basename(item))
                 shutil_copy(item, dest)
 
-    if meta.vcruntime:
+    if meta.vcruntime and config['no_vcredist'] == False:
 
         if meta.amd64:
             vcredist = config['vcredist64']
@@ -1064,6 +1066,7 @@ def main():
     parser.add_argument('--inno-compiler', help='Path to Inno Setup Compiler compil32.exe (including name)')
     parser.add_argument('--vcredist32', help='Path to Microsoft Visual C++ Redistributable x86')
     parser.add_argument('--vcredist64', help='Path to Microsoft Visual C++ Redistributable x64')
+    parser.add_argument('--no-vcredist', action='store_true', help='Do not include Visual C++ Redistributable')
     parser.add_argument('--msys-root', help='Msys root')
     parser.add_argument('--msystem', choices=['MINGW32', 'MINGW64', 'UCRT64', 'CLANG64', 'MSYS2'], help='Msys root')
 
