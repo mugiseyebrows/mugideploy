@@ -131,7 +131,6 @@ class Resolver:
         items = self._binaries[name_]
         if len(items) > 1:
             msys_root = self._msys_root
-            print('msys_root', msys_root)
             if msys_root is not None:
                 
                 items_ = [item for item in items if is_child_path(item, msys_root)]
