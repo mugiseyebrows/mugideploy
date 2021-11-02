@@ -15,6 +15,8 @@ from dataclasses import dataclass
 # TODO update --license
 # TODO collect --zip
 
+MSYSTEMS = ['MINGW32', 'MINGW64', 'UCRT64', 'CLANG64', 'MSYS2']
+
 def debug_print_on(*args):
     print(*args)
 
@@ -483,6 +485,24 @@ def update_config(config, args):
             first_bin = config['bin'][0]
             name = os.path.splitext(os.path.basename(first_bin))[0]
         config['app'] = name
+    
+    if has_any_bin(config):
+        first_bin = os.path.realpath(config['bin'][0]).lower()
+
+        if config.get('msys_root') is None:
+            if first_bin.startswith('c:\\msys64'):
+                config['msys_root'] = 'C:\\msys64'
+
+        if config.get('msystem') is None and config.get('msys_root') is not None:
+            for msystem in MSYSTEMS:
+                path = os.path.join(config['msys_root'], msystem).lower()
+                #debug_print('path',path)
+                if first_bin.startswith(path):
+                    config['msystem'] = msystem
+                    break
+        debug_print('first_bin', first_bin)
+        debug_print('msys_root', config.get('msys_root'))
+        debug_print('msystem', config.get('msystem'))
 
 def without(obj, keys):
     return {k:v for k,v in obj.items() if k not in keys}
@@ -1071,7 +1091,7 @@ def main():
     parser.add_argument('--vcredist64', help='Path to Microsoft Visual C++ Redistributable x64')
     parser.add_argument('--no-vcredist', action='store_true', help='Do not include Visual C++ Redistributable')
     parser.add_argument('--msys-root', help='Msys root')
-    parser.add_argument('--msystem', choices=['MINGW32', 'MINGW64', 'UCRT64', 'CLANG64', 'MSYS2'], help='msystem')
+    parser.add_argument('--msystem', choices=MSYSTEMS, help='msystem')
 
     parser.add_argument('--version-header', help='Path to version.h (including name)')
     parser.add_argument('--src', help='Path to sources')
