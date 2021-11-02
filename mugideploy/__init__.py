@@ -448,7 +448,7 @@ def update_config(config, args):
         config['src'] = args.src
 
     if args.version_header:
-        config['version-header'] = args.version_header
+        config['version_header'] = args.version_header
 
     config['no_vcredist'] = args.no_vcredist
 
@@ -991,8 +991,8 @@ def run_version_script(config, logger):
         version = SourceFileLoader("version", path).load_module()
         version.main()
     else:
-        if 'version-header' in config:
-            path = config['version-header']
+        if 'version_header' in config:
+            path = config['version_header']
         elif 'src' in config:
             path = os.path.join(config['src'], 'version.h')
         else:
