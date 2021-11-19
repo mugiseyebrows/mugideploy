@@ -561,6 +561,7 @@ class ResolveMetaData:
     qt: bool
     qt4: bool
     qt5: bool
+    qt_debug: bool
     gtk: bool
     qt_gui: bool
     vcruntime: bool
@@ -591,19 +592,27 @@ def resolve_binaries(logger, config):
 
     is_qt4 = len({'qtcore4.dll','qtcored4.dll'}.intersection(dependencies)) > 0
 
-    is_qt5 = len({'qt5core.dll','qt5cored.dll', 'qt5widgets.dll'}.intersection(dependencies)) > 0
+    is_qt5 = len({'qt5core.dll','qt5cored.dll'}.intersection(dependencies)) > 0
 
     is_qt = is_qt4 or is_qt5
 
     is_qt_gui = len({
-        'qt5gui.dll','qt5guid.dll','qt5widgets.dll','qt5widgetsd.dll',
-        'qtcore4.dll','qtcored4.dll','qtgui4.dll','qtguid4.dll'
+        'qtgui4.dll','qtguid4.dll',
+        'qt5gui.dll','qt5guid.dll',
+    }.intersection(dependencies)) > 0
+
+    is_qt_debug = len({
+        'qtcored4.dll',
+        'qt5cored.dll',
     }.intersection(dependencies)) > 0
 
     if is_qt_gui and is_qt5:
         if 'plugins' not in config:
             config['plugins'] = []
-        config['plugins'] += ['qwindowsvistastyle', 'qwindows']
+        if is_qt_debug:
+            config['plugins'] += ['qwindowsvistastyled', 'qwindowsd']
+        else:
+            config['plugins'] += ['qwindowsvistastyle', 'qwindows']
 
     binaries = config['bin']
 
@@ -632,7 +641,7 @@ def resolve_binaries(logger, config):
 
     pool = BinariesPool(binaries, resolver, logger)
 
-    meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt_gui=is_qt_gui, vcruntime=pool.vcruntime(), gtk=is_gtk)
+    meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt_gui=is_qt_gui, qt_debug=is_qt_debug, vcruntime=pool.vcruntime(), gtk=is_gtk)
     debug_print(meta)
     return pool.binaries(), meta
 
