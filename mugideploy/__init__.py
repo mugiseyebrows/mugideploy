@@ -10,6 +10,7 @@ import subprocess
 from colorama import Fore, Back, Style, init as colorama_init
 from importlib.machinery import SourceFileLoader
 from dataclasses import dataclass
+from collections import defaultdict
 
 # TODO do not store (optionally) plugins-path
 # TODO update --license
@@ -114,7 +115,7 @@ def unique_case_insensitive(paths):
 
 class Resolver:
     def __init__(self, paths, exts, msys_root):
-        binaries = dict()
+        binaries = defaultdict(list)
         for path in paths:
             if os.path.isdir(path):
                 items = os.listdir(path)
@@ -123,8 +124,6 @@ class Resolver:
                     if ext_ not in exts:
                         continue
                     name = item.lower()
-                    if name not in binaries:
-                        binaries[name] = []
                     binaries[name].append(os.path.join(path, item))
         for name, items in binaries.items():
             binaries[name] = unique_case_insensitive(items)
