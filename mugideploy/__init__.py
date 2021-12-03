@@ -109,6 +109,9 @@ class DataItem:
 def is_child_path(path, base):
     return os.path.realpath(path).startswith(os.path.realpath(base))
 
+def unique_case_insensitive(paths):
+    return list({v.lower(): v for v in paths}.values())
+
 class Resolver:
     def __init__(self, paths, exts, msys_root):
         binaries = dict()
@@ -123,6 +126,8 @@ class Resolver:
                     if name not in binaries:
                         binaries[name] = []
                     binaries[name].append(os.path.join(path, item))
+        for name, items in binaries.items():
+            binaries[name] = unique_case_insensitive(items)
         self._binaries = binaries
         self._msys_root = msys_root
     
