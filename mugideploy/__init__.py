@@ -1039,7 +1039,8 @@ def run_version_script(config, logger):
 
 def find_inno_compiler():
     return existing([
-        os.path.join(os.environ['ProgramFiles(x86)'], 'Inno Setup 6', 'compil32.exe')
+        os.path.join(os.environ['ProgramFiles(x86)'], 'Inno Setup 6', 'compil32.exe'),
+        os.path.join(os.environ['ProgramFiles'], 'Inno Setup 6', 'compil32.exe')
     ])
     
 class GlobalConfig:
@@ -1054,6 +1055,8 @@ class GlobalConfig:
                 data = dict()
         except Exception:
             pass
+        if data.get('inno_compiler') is None:
+            data['inno_compiler'] = find_inno_compiler()
         self._data = data
         self._changed = False
 
@@ -1141,7 +1144,7 @@ def main():
         
     elif args.command == 'inno-compile':
 
-        inno_compile(logger)
+        inno_compile(config, logger)
 
     elif args.command in ['bump-major', 'bump-minor', 'bump-fix']:
 
