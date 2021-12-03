@@ -147,7 +147,7 @@ class Resolver:
                 elif len(items_) == 1:
                     return items_[0]
                 else:
-                    logger.print_info('{} not found in {}'.format(name_, msys_root))
+                    debug_print('{} not found in {}'.format(name_, msys_root))
 
             logger.multiple_candidates(name, items)
             #print("multiple choises for {}:\n{}\n".format(name, "\n".join(items)))
