@@ -11,6 +11,7 @@ from colorama import Fore, Back, Style, init as colorama_init
 from importlib.machinery import SourceFileLoader
 from dataclasses import dataclass
 from collections import defaultdict
+import zipfile
 
 # TODO do not store (optionally) plugins-path
 # TODO update --license
@@ -958,6 +959,8 @@ def collect(config, logger, binaries, meta, dry_run):
 
     logger.flush_copied()
 
+    return base
+
 def inno_compile(config, logger):
     
     path = "setup.iss"
@@ -1086,6 +1089,17 @@ class GlobalConfig:
             return
         write_json(self._path(), self._data)
 
+def zip_dir(config, logger, path):
+    parent_dir = os.path.dirname(path)
+    zip_path = path + '.zip'
+    with zipfile.ZipFile(zip_path, 'w') as zip:
+        for root, dirs, files in os.walk(path):
+            for f in files:
+                abs_path = os.path.join(root, f)
+                rel_path = os.path.relpath(abs_path, parent_dir)
+                zip.write(abs_path, rel_path)
+    logger.print_info("Ziped to {}".format(zip_path))
+
 def main():
 
     colorama_init()
@@ -1116,6 +1130,7 @@ def main():
 
     parser.add_argument('--save', action='store_true')
     parser.add_argument('--dry-run', action='store_true', help="Do not copy files (collect command)")
+    parser.add_argument('--zip', action='store_true', help='Zip collected data')
 
     args = parser.parse_args()
 
@@ -1141,7 +1156,9 @@ def main():
     elif args.command == 'collect':
 
         binaries, meta = resolve_binaries(logger, config)
-        collect(config, logger, binaries, meta, args.dry_run)
+        path = collect(config, logger, binaries, meta, args.dry_run)
+        if args.zip:
+            zip_dir(config, logger, path)
 
     elif args.command == 'inno-script':
 
