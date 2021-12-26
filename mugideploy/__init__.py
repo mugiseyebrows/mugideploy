@@ -457,6 +457,7 @@ def update_config(config, args):
         config['version_header'] = args.version_header
 
     config['no_vcredist'] = args.no_vcredist
+    config['unix_dirs'] = args.unix_dirs
 
     if args.data is not None:
 
@@ -845,7 +846,7 @@ def collect(config, logger, binaries, meta, dry_run):
 
     base = os.path.join(os.getcwd(), "{}-{}-{}".format(config["app"], config["version"], arch))
 
-    if meta.gtk:
+    if meta.gtk or config['unix_dirs']:
         base_bin = os.path.join(base, 'bin')
     else:
         base_bin = base
@@ -1108,6 +1109,7 @@ def main():
     parser.add_argument('--no-vcredist', action='store_true', help='Do not include Visual C++ Redistributable')
     parser.add_argument('--msys-root', help='Msys root')
     parser.add_argument('--msystem', choices=MSYSTEMS, help='msystem')
+    parser.add_argument('--unix-dirs', action='store_true', help='bin var etc dirs')
 
     parser.add_argument('--version-header', help='Path to version.h (including name)')
     parser.add_argument('--src', help='Path to sources')
