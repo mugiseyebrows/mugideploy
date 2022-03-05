@@ -68,6 +68,12 @@ class Logger():
     def multiple_candidates(self, name, items):
         print(Fore.MAGENTA + "Multiple candidates for " + name + "\n" + Fore.MAGENTA + Style.BRIGHT + "\n".join(items) + Fore.RESET + Style.NORMAL + "\n")
 
+
+
+class JSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        return obj.__dict__    
+
 class Binary:
     def __init__(self, name, path = None, isplugin = False, dest = None):
         self.name = name
@@ -75,6 +81,8 @@ class Binary:
         self.dependencies = None
         self.isplugin = isplugin
         self.dest = dest
+    def __repr__(self):
+        return "Binary({},{},{},{})".format(self.name, self.path, self.isplugin, self.dest)
     
 class DataItem:
 
@@ -1106,7 +1114,7 @@ def main():
 
     parser = argparse.ArgumentParser(prog='mugideploy')
 
-    parser.add_argument('command', choices=['update', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins'])
+    parser.add_argument('command', choices=['update', 'find', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins'])
     
     parser.add_argument('--bin', nargs='+')
     parser.add_argument('--app')
@@ -1132,6 +1140,9 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help="Do not copy files (collect command)")
     parser.add_argument('--zip', action='store_true', help='Zip collected data')
 
+    # find
+    parser.add_argument('-o','--output', help='Path to save dependency tree')
+
     args = parser.parse_args()
 
     debug_print(args)
@@ -1152,6 +1163,16 @@ def main():
         
     if args.command == 'update':
         pass
+
+    elif args.command == 'find':
+
+        if args.output is None:
+            print("Specify ouput path")
+            exit(1)
+
+        binaries, meta = resolve_binaries(logger, config)
+        with open(args.output, 'w', encoding='utf-8') as f:
+            json.dump(binaries, f, ensure_ascii=False, indent=1, cls=JSONEncoder)
 
     elif args.command == 'collect':
 
