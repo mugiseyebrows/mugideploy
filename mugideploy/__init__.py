@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 import zipfile
 from dataclasses import dataclass
+from collections import defaultdict
 
 # TODO do not store (optionally) plugins-path
 # TODO update --license
@@ -585,11 +586,6 @@ def resolve_binaries(logger, config):
         logger.print_error('Specify binaries please')
         return
 
-    """
-    if 'path' not in config:
-        config['path'] = os.environ['PATH'].split(';')
-    """
-
     logger.print_info("Resolving imports\n")
 
     dependencies = [e.lower() for e in get_dependencies(config['bin'][0])]
@@ -1107,13 +1103,71 @@ def zip_dir(config, logger, path):
                 zip.write(abs_path, rel_path)
     logger.print_info("Ziped to {}".format(zip_path))
 
+class PrettyNames:
+    def __init__(self):
+        self._names = defaultdict(list)
+
+    def __setitem__(self, name, value):
+        name_ = name.lower()
+        self._names[name_].append(name)
+
+    def __getitem__(self, name):
+        name_ = name.lower()
+        for name in self._names[name_]:
+            b = os.path.splitext(name)[0]
+            if b.upper() != b:
+                return name
+        return self._names[name_][0]
+
+    def names(self, name):
+        name_ = name.lower()
+        return self._names[name_]
+
+def write_graph(binaries, meta, output, skip_system):
+
+    names = PrettyNames()
+
+    if skip_system:
+        skip = [name.lower() for name in os.listdir("C:\\windows\\system32") if os.path.splitext(name)[1].lower() == '.dll']
+    else:
+        skip = []
+
+    deps = set()
+    for binary in binaries:
+        
+        name = binary.name
+
+        if name.lower() in skip:
+            continue
+
+        name1 = binary.name
+        name2 = os.path.basename(binary.path)
+
+        names[name1] = name
+        names[name2] = name
+
+        #print("names", name1, name2, names.names(name))
+
+        for dependancy in binary.dependencies:
+            if dependancy.lower() in skip:
+                continue
+            deps.add((binary.name.lower(), dependancy.lower()))
+            names[dependancy] = dependancy
+    
+    deps_ = "\n".join(['    "{}" -> "{}"'.format(names[name], names[dependancy]) for name, dependancy in deps]) + "\n"
+
+    with open(output, 'w', encoding='utf-8') as f:
+        f.write("digraph G {\nnode [shape=rect]\n")
+        f.write(deps_)
+        f.write("}\n")
+
 def main():
 
     colorama_init()
 
     parser = argparse.ArgumentParser(prog='mugideploy')
 
-    parser.add_argument('command', choices=['update', 'find', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins'])
+    parser.add_argument('command', choices=['update', 'find', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins'])
     
     parser.add_argument('--bin', nargs='+')
     parser.add_argument('--app')
@@ -1139,8 +1193,10 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help="Do not copy files (collect command)")
     parser.add_argument('--zip', action='store_true', help='Zip collected data')
 
-    # find
+    # find, graph
     parser.add_argument('-o','--output', help='Path to save dependency tree')
+    # graph
+    parser.add_argument('--skip-system', action='store_true', help='Omit system32 libraries')
 
     args = parser.parse_args()
 
@@ -1172,6 +1228,15 @@ def main():
         binaries, meta = resolve_binaries(logger, config)
         with open(args.output, 'w', encoding='utf-8') as f:
             json.dump(binaries, f, ensure_ascii=False, indent=1, cls=JSONEncoder)
+
+    elif args.command == 'graph':
+
+        if args.output is None:
+            print("Specify ouput path")
+            exit(1)
+
+        binaries, meta = resolve_binaries(logger, config)
+        write_graph(binaries, meta, args.output, args.skip_system)
 
     elif args.command == 'collect':
 
