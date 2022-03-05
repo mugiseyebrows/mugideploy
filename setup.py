@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="mugideploy",
-    version="0.0.8",
+    version="0.0.9",
     author="Doronin Stanislav",
     author_email="mugisbrows@gmail.com",
     url='https://github.com/mugiseyebrows/mugideploy',
