@@ -12,6 +12,7 @@ from importlib.machinery import SourceFileLoader
 from dataclasses import dataclass
 from collections import defaultdict
 import zipfile
+from dataclasses import dataclass
 
 # TODO do not store (optionally) plugins-path
 # TODO update --license
@@ -74,16 +75,14 @@ class JSONEncoder(json.JSONEncoder):
     def default(self, obj):
         return obj.__dict__    
 
+@dataclass
 class Binary:
-    def __init__(self, name, path = None, isplugin = False, dest = None):
-        self.name = name
-        self.path = path
-        self.dependencies = None
-        self.isplugin = isplugin
-        self.dest = dest
-    def __repr__(self):
-        return "Binary({},{},{},{})".format(self.name, self.path, self.isplugin, self.dest)
-    
+    name: str
+    path: str = None
+    dependencies: list[object] = None
+    isplugin: bool = False
+    dest: str = None
+
 class DataItem:
 
     (
