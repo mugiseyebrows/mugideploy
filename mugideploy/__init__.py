@@ -125,8 +125,8 @@ def unique_case_insensitive(paths):
 class Resolver:
     def __init__(self, paths, exts, msys_root):
         binaries = defaultdict(list)
-        for path in paths:
-            if os.path.isdir(path):
+        for path in unique_case_insensitive(paths):
+            try:
                 items = os.listdir(path)
                 for item in items:
                     ext_ = os.path.splitext(item)[1].lower()
@@ -134,6 +134,9 @@ class Resolver:
                         continue
                     name = item.lower()
                     binaries[name].append(os.path.join(path, item))
+            except Exception as e:
+                #print(e)
+                pass
         for name, items in binaries.items():
             binaries[name] = unique_case_insensitive(items)
         self._binaries = binaries
