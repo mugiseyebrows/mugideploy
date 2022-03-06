@@ -14,6 +14,7 @@ from collections import defaultdict
 import zipfile
 from dataclasses import dataclass
 from collections import defaultdict
+import glob
 
 # TODO do not store (optionally) plugins-path
 # TODO update --license
@@ -413,7 +414,7 @@ def guess_plugins_path():
     if os.path.exists(path):
         return path
 
-def append_list(config, key, values):
+def append_list(config, key, values, expand_globs = False):
 
     if values is None:
         return
@@ -429,7 +430,15 @@ def append_list(config, key, values):
     else:
         values_ = [values]
 
+    values__ = []
+
     for value in values_:
+        if expand_globs and glob.has_magic(value):
+            values__ += glob.glob(value)
+        else:
+            values__.append(value)
+    
+    for value in values__:
         if value not in config[key]:
             config[key].append(value)
 
@@ -484,8 +493,9 @@ def update_config(config, args):
 
         append_list(config, 'data', items)
 
-    for key in ['bin', 'plugins']:
-        append_list(config, key, getattr(args, key))
+    append_list(config, 'bin', getattr(args, 'bin'), expand_globs = True)
+
+    append_list(config, 'plugins', getattr(args, 'plugins'))
 
     append_list(config, 'plugins-path', args.plugins_path)
 
