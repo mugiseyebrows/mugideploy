@@ -12,9 +12,7 @@ from importlib.machinery import SourceFileLoader
 from dataclasses import dataclass
 from collections import defaultdict
 import zipfile
-from dataclasses import dataclass
-from collections import defaultdict
-import glob
+import urllib.parse
 
 # TODO do not store (optionally) plugins-path
 # TODO update --license
