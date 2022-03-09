@@ -1136,7 +1136,7 @@ class PrettyNames:
         name_ = name.lower()
         return self._names[name_]
 
-def write_graph(binaries, meta, output, skip_system):
+def write_graph(binaries, meta, output, skip_system, show_graph):
 
     names = PrettyNames()
 
@@ -1167,12 +1167,14 @@ def write_graph(binaries, meta, output, skip_system):
             deps.add((binary.name.lower(), dependancy.lower()))
             names[dependancy] = dependancy
     
-    deps_ = "\n".join(['    "{}" -> "{}"'.format(names[name], names[dependancy]) for name, dependancy in deps]) + "\n"
+    digraph = "digraph G {\nnode [shape=rect]\n" + "\n".join(['    "{}" -> "{}"'.format(names[name], names[dependancy]) for name, dependancy in deps]) + "\n}\n"
+
+    if show_graph:
+        url = 'https://dreampuf.github.io/GraphvizOnline/#' + urllib.parse.quote(digraph)
+        os.startfile(url)
 
     with open(output, 'w', encoding='utf-8') as f:
-        f.write("digraph G {\nnode [shape=rect]\n")
-        f.write(deps_)
-        f.write("}\n")
+        f.write(digraph)
 
 def main():
 
@@ -1207,9 +1209,10 @@ def main():
     parser.add_argument('--zip', action='store_true', help='Zip collected data')
 
     # find, graph
-    parser.add_argument('-o','--output', help='Path to save dependency tree')
+    parser.add_argument('-o','--output', help='Path to save dependency tree or graph')
     # graph
-    parser.add_argument('--skip-system', action='store_true', help='Omit system32 libraries')
+    parser.add_argument('--skip-system', action='store_true', help='Skip system32 libraries')
+    parser.add_argument('--show', action='store_true', help='Show graph in browser')
 
     args = parser.parse_args()
 
@@ -1249,7 +1252,7 @@ def main():
             exit(1)
 
         binaries, meta = resolve_binaries(logger, config)
-        write_graph(binaries, meta, args.output, args.skip_system)
+        write_graph(binaries, meta, args.output, args.skip_system, args.show)
 
     elif args.command == 'collect':
 
