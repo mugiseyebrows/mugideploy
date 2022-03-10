@@ -610,15 +610,15 @@ def resolve_binaries(logger, config):
 
     is_amd64 = test_amd64(config['bin'][0])
 
-    is_qt4 = len({'qtcore4.dll','qtcored4.dll'}.intersection(dependencies)) > 0
+    is_qt4 = len({'qtcore4.dll', 'qtcored4.dll'}.intersection(dependencies)) > 0
 
-    is_qt5 = len({'qt5core.dll','qt5cored.dll'}.intersection(dependencies)) > 0
+    is_qt5 = len({'qt5core.dll', 'qt5cored.dll', 'qt5widgets.dll'}.intersection(dependencies)) > 0
 
     is_qt = is_qt4 or is_qt5
 
     is_qt_gui = len({
-        'qtgui4.dll','qtguid4.dll',
-        'qt5gui.dll','qt5guid.dll',
+        'qtgui4.dll', 'qtguid4.dll',
+        'qt5gui.dll', 'qt5guid.dll', 'qt5widgets.dll'
     }.intersection(dependencies)) > 0
 
     is_qt_debug = len({
