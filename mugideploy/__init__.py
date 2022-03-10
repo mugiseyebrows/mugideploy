@@ -640,8 +640,22 @@ def resolve_binaries(logger, config):
         collection = PluginsCollection(config['plugins-path'])
         binaries += collection.binaries(config['plugins'])
 
-    extra_paths = [os.path.dirname(os.path.realpath(binary)) for binary in binaries]
-    
+    extra_paths = []
+
+    def dirname(path):
+        res = os.path.dirname(path)
+        if res == '':
+            return '.'
+        return res
+
+    for binary in binaries:
+        if isinstance(binary, str):
+            extra_paths.append(dirname(binary))
+        elif isinstance(binary, Binary):
+            if binary.isplugin:
+                continue
+            extra_paths.append(dirname(binary.path))
+
     search_paths = os.environ['PATH'].split(";") + extra_paths
 
     debug_print(config)
