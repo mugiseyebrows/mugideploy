@@ -708,7 +708,7 @@ class InnoScript(dict):
 def inno_script(config, logger, binaries, meta):
 
     #qt_conf_path = os.path.join(os.getenv('APPDATA'), "mugideploy", "qt.conf")
-    qt_conf_path = os.path.join(os.getcwd(), 'tmp', "qt.conf")
+    qt_conf_path = os.path.join('tmp', "qt.conf")
     
     if meta.qt:
         makedirs(os.path.dirname(qt_conf_path))
@@ -846,11 +846,13 @@ end;""".format(os.path.basename(vcredist)))
     path = os.path.join(os.getcwd(), 'setup.iss')
     script.write(path)
 
-def collect(config, logger, binaries, meta, dry_run):
+def collect(config, logger, binaries, meta, dry_run, dest, skip):
 
     arch = "win64" if meta.amd64 else "win32"
 
-    base = os.path.join(os.getcwd(), "{}-{}-{}".format(config["app"], config["version"], arch))
+    base = dest.replace('%app%', config["app"]).replace('%version%',config["version"]).replace('%arch%',arch)
+
+    #base = os.path.join(os.getcwd(), "{}-{}-{}".format(config["app"], config["version"], arch))
 
     if meta.gtk or config['unix_dirs']:
         base_bin = os.path.join(base, 'bin')
@@ -860,6 +862,8 @@ def collect(config, logger, binaries, meta, dry_run):
     def shutil_copy(src, dst, verbose = True):
         if not dry_run:
             #debug_print(src, dst)
+            if os.path.basename(src) in skip:
+                return
             shutil.copy(src, dst)
         if verbose:
             logger.print_copied(src, dst)
@@ -890,7 +894,7 @@ def collect(config, logger, binaries, meta, dry_run):
 
     qt_conf_path = os.path.join(base_bin, "qt.conf")
 
-    if meta.qt:
+    if meta.qt and "qt.conf" not in skip:
         logger.print_copied(None, qt_conf_path)
         if not dry_run:
             write_qt_conf(qt_conf_path)
@@ -1179,6 +1183,8 @@ def main():
     parser.add_argument('--plugins-path', nargs='+')
     parser.add_argument('--toolchain', help="One of: mingw32, vs, cmake (build command)")
     parser.add_argument('--changelog')
+    parser.add_argument('--skip', nargs='+', help="Names to skip on collect")
+    parser.add_argument('--dest', help="destination path or path template", default='%app%-%version%-%arch%')
 
     parser.add_argument('--inno-compiler', help='Path to Inno Setup Compiler compil32.exe (including name)')
     parser.add_argument('--vcredist32', help='Path to Microsoft Visual C++ Redistributable x86')
@@ -1243,7 +1249,7 @@ def main():
     elif args.command == 'collect':
 
         binaries, meta = resolve_binaries(logger, config)
-        path = collect(config, logger, binaries, meta, args.dry_run)
+        path = collect(config, logger, binaries, meta, args.dry_run, args.dest, args.skip)
         if args.zip:
             zip_dir(config, logger, path)
 
