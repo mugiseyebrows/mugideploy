@@ -12,8 +12,7 @@ from importlib.machinery import SourceFileLoader
 from dataclasses import dataclass
 from collections import defaultdict
 import zipfile
-from dataclasses import dataclass
-from collections import defaultdict
+import urllib.parse
 
 # TODO do not store (optionally) plugins-path
 # TODO update --license
@@ -125,8 +124,8 @@ def unique_case_insensitive(paths):
 class Resolver:
     def __init__(self, paths, exts, msys_root):
         binaries = defaultdict(list)
-        for path in paths:
-            if os.path.isdir(path):
+        for path in unique_case_insensitive(paths):
+            try:
                 items = os.listdir(path)
                 for item in items:
                     ext_ = os.path.splitext(item)[1].lower()
@@ -134,6 +133,9 @@ class Resolver:
                         continue
                     name = item.lower()
                     binaries[name].append(os.path.join(path, item))
+            except Exception as e:
+                #print(e)
+                pass
         for name, items in binaries.items():
             binaries[name] = unique_case_insensitive(items)
         self._binaries = binaries
@@ -410,7 +412,7 @@ def guess_plugins_path():
     if os.path.exists(path):
         return path
 
-def append_list(config, key, values):
+def append_list(config, key, values, expand_globs = False):
 
     if values is None:
         return
@@ -426,7 +428,15 @@ def append_list(config, key, values):
     else:
         values_ = [values]
 
+    values__ = []
+
     for value in values_:
+        if expand_globs and glob.has_magic(value):
+            values__ += glob.glob(value)
+        else:
+            values__.append(value)
+    
+    for value in values__:
         if value not in config[key]:
             config[key].append(value)
 
@@ -481,8 +491,9 @@ def update_config(config, args):
 
         append_list(config, 'data', items)
 
-    for key in ['bin', 'plugins']:
-        append_list(config, key, getattr(args, key))
+    append_list(config, 'bin', getattr(args, 'bin'), expand_globs = True)
+
+    append_list(config, 'plugins', getattr(args, 'plugins'))
 
     append_list(config, 'plugins-path', args.plugins_path)
 
@@ -599,15 +610,15 @@ def resolve_binaries(logger, config):
 
     is_amd64 = test_amd64(config['bin'][0])
 
-    is_qt4 = len({'qtcore4.dll','qtcored4.dll'}.intersection(dependencies)) > 0
+    is_qt4 = len({'qtcore4.dll', 'qtcored4.dll'}.intersection(dependencies)) > 0
 
-    is_qt5 = len({'qt5core.dll','qt5cored.dll'}.intersection(dependencies)) > 0
+    is_qt5 = len({'qt5core.dll', 'qt5cored.dll', 'qt5widgets.dll'}.intersection(dependencies)) > 0
 
     is_qt = is_qt4 or is_qt5
 
     is_qt_gui = len({
-        'qtgui4.dll','qtguid4.dll',
-        'qt5gui.dll','qt5guid.dll',
+        'qtgui4.dll', 'qtguid4.dll',
+        'qt5gui.dll', 'qt5guid.dll', 'qt5widgets.dll'
     }.intersection(dependencies)) > 0
 
     is_qt_debug = len({
@@ -629,8 +640,22 @@ def resolve_binaries(logger, config):
         collection = PluginsCollection(config['plugins-path'])
         binaries += collection.binaries(config['plugins'])
 
-    extra_paths = [os.path.dirname(binary) for binary in binaries]
-    
+    extra_paths = []
+
+    def dirname(path):
+        res = os.path.dirname(path)
+        if res == '':
+            return '.'
+        return res
+
+    for binary in binaries:
+        if isinstance(binary, str):
+            extra_paths.append(dirname(binary))
+        elif isinstance(binary, Binary):
+            if binary.isplugin:
+                continue
+            extra_paths.append(dirname(binary.path))
+
     search_paths = os.environ['PATH'].split(";") + extra_paths
 
     debug_print(config)
@@ -1129,7 +1154,7 @@ class PrettyNames:
         name_ = name.lower()
         return self._names[name_]
 
-def write_graph(binaries, meta, output, skip_system):
+def write_graph(binaries, meta, output, skip_system, show_graph):
 
     names = PrettyNames()
 
@@ -1160,12 +1185,14 @@ def write_graph(binaries, meta, output, skip_system):
             deps.add((binary.name.lower(), dependancy.lower()))
             names[dependancy] = dependancy
     
-    deps_ = "\n".join(['    "{}" -> "{}"'.format(names[name], names[dependancy]) for name, dependancy in deps]) + "\n"
+    digraph = "digraph G {\nnode [shape=rect]\n" + "\n".join(['    "{}" -> "{}"'.format(names[name], names[dependancy]) for name, dependancy in deps]) + "\n}\n"
+
+    if show_graph:
+        url = 'https://dreampuf.github.io/GraphvizOnline/#' + urllib.parse.quote(digraph)
+        os.startfile(url)
 
     with open(output, 'w', encoding='utf-8') as f:
-        f.write("digraph G {\nnode [shape=rect]\n")
-        f.write(deps_)
-        f.write("}\n")
+        f.write(digraph)
 
 def main():
 
@@ -1202,9 +1229,10 @@ def main():
     parser.add_argument('--zip', action='store_true', help='Zip collected data')
 
     # find, graph
-    parser.add_argument('-o','--output', help='Path to save dependency tree')
+    parser.add_argument('-o','--output', help='Path to save dependency tree or graph')
     # graph
-    parser.add_argument('--skip-system', action='store_true', help='Omit system32 libraries')
+    parser.add_argument('--skip-system', action='store_true', help='Skip system32 libraries')
+    parser.add_argument('--show', action='store_true', help='Show graph in browser')
 
     args = parser.parse_args()
 
@@ -1244,7 +1272,7 @@ def main():
             exit(1)
 
         binaries, meta = resolve_binaries(logger, config)
-        write_graph(binaries, meta, args.output, args.skip_system)
+        write_graph(binaries, meta, args.output, args.skip_system, args.show)
 
     elif args.command == 'collect':
 
