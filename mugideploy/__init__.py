@@ -873,6 +873,9 @@ end;""".format(os.path.basename(vcredist)))
 
 def collect(config, logger, binaries, meta, dry_run, dest, skip):
 
+    if skip is None:
+        skip = []
+
     arch = "win64" if meta.amd64 else "win32"
 
     base = dest.replace('%app%', config["app"]).replace('%version%',config["version"]).replace('%arch%',arch)
