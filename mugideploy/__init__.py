@@ -70,6 +70,26 @@ class Logger():
         print(Fore.MAGENTA + "Multiple candidates for " + name + "\n" + Fore.MAGENTA + Style.BRIGHT + "\n".join(items) + Fore.RESET + Style.NORMAL + "\n")
 
 
+class MutedLogger():
+
+    def print_info(self, msg):
+        pass
+
+    def print_error(self, msg):
+        pass
+
+    def print_copied(self, src, dst):
+        pass
+
+    def flush_copied(self):
+        pass
+
+    def print_writen(self, path):
+        pass
+
+    def multiple_candidates(self, name, items):
+        pass
+
 
 class JSONEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -1203,7 +1223,7 @@ def main():
 
     parser = argparse.ArgumentParser(prog='mugideploy')
 
-    parser.add_argument('command', choices=['update', 'find', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins'])
+    parser.add_argument('command', choices=['update', 'find', 'list', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins'])
     
     parser.add_argument('--bin', nargs='+')
     parser.add_argument('--app')
@@ -1267,6 +1287,14 @@ def main():
         binaries, meta = resolve_binaries(logger, config)
         with open(args.output, 'w', encoding='utf-8') as f:
             json.dump(binaries, f, ensure_ascii=False, indent=1, cls=JSONEncoder)
+
+    elif args.command == 'list':
+
+        mutedLogger = MutedLogger()
+
+        binaries, meta = resolve_binaries(mutedLogger, config)
+        for binary in binaries:
+            print(binary.path)
 
     elif args.command == 'graph':
 
