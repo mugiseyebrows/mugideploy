@@ -12,7 +12,6 @@ from importlib.machinery import SourceFileLoader
 from dataclasses import dataclass
 from collections import defaultdict
 import zipfile
-import urllib.parse
 
 # TODO do not store (optionally) plugins-path
 # TODO update --license
@@ -164,7 +163,10 @@ class Resolver:
     def resolve(self, name, logger):
         name_ = name.lower()
         if name_ not in self._binaries:
-            raise ValueError("{} cannot be found".format(name))
+            if name_.startswith('api-ms'):
+                return None
+            else:
+                raise ValueError("{} cannot be found".format(name))
         items = self._binaries[name_]
         if len(items) > 1:
             msys_root = self._msys_root
@@ -189,6 +191,17 @@ def makedirs(path):
         os.makedirs(path)
     except:
         pass
+
+def deduplicate(binaries):
+    res = []
+    names = set()
+    for item in binaries:
+        name = item.name.lower()
+        if name in names:
+            continue
+        res.append(item)
+        names.add(name)
+    return res
 
 def get_dependencies(path):
     pe = pefile.PE(path, fast_load=True)
@@ -233,36 +246,88 @@ class PEReader:
             json.dump(self._cache, f, indent=1)
         
 class BinariesPool:
-    def __init__(self, paths, resolver, logger):
+    def __init__(self, paths, resolver: Resolver, config, logger):
+
+        print(config)
+
         vcruntime = False
         pool = [Binary(os.path.basename(path), path) if isinstance(path, str) else path for path in paths]
         i = 0
+
+        skip_list = set(['msvcp140.dll','msvcr90.dll'])
+        
         reader = PEReader()
         while i < len(pool):
             item = pool[i]
             if item.path is None:
                 item.path = resolver.resolve(item.name, logger)
             if item.dependencies is None:
+                if item.path is None:
+                    item.dependencies = []
+                    continue
                 dependencies = reader.get_dependencies(item.path)
                 for dep in dependencies:
                     if dep.lower().startswith('vcruntime'):
                         vcruntime = True
-                item.dependencies = [dep for dep in dependencies if dep.lower() not in ['msvcp140.dll','msvcr90.dll','vcruntime140.dll','vcruntime140_1.dll']]
+                item.dependencies = [dep for dep in dependencies if dep.lower() not in skip_list]
                 for dll in item.dependencies:
-                    if dll.lower().startswith('api-ms-win'):
-                        continue
                     if not any(map(lambda item: item.name.lower() == dll.lower(), pool)):
                         pool.append(Binary(dll))
             i += 1
         self._pool = pool
         self._vcruntime = vcruntime
-        self._system = [name.lower() for name in os.listdir('C:\\windows\\system32') if os.path.splitext(name)[1].lower() == '.dll' and name not in ['libssl-1_1-x64.dll', 'libcrypto-1_1-x64.dll']]
+
+        def is_system(name):
+            name = name.lower()
+            if name.startswith('vcruntime'):
+                return False
+            if name.startswith('libssl'):
+                return False
+            if name.startswith('libcrypto'):
+                return False
+            if name.startswith('api-ms'):
+                return False
+            return True
+
+        def file_ext(name):
+            return os.path.splitext(name)[1].lower()
+
+        self._system = [name.lower() for name in os.listdir('C:\\windows\\system32') if file_ext(name) == '.dll' and is_system(name)]
+        self._msapi = [name.lower() for name in os.listdir('C:\\windows\\system32') if name.lower().startswith('api-ms')] #+ [name.lower() for name in os.listdir('C:\\windows\\system32\\downlevel') if name.lower().startswith('api-ms')]
+
         reader.save()
     
-    def binaries(self, system = False):
+    def find(self, name):
+        name = os.path.basename(name).lower()
+        for item in self._pool:
+            if item.name.lower() == name:
+                return item
+
+    def binaries(self, binaries, system = False, msapi = False):
+        res = []
+        for item in binaries:
+            if isinstance(item, str):
+                item = self.find(item)
+            res.append(item)
+            if item.dependencies is None:
+                continue
+            for name in item.dependencies:
+                if not system and name.lower() in self._system:
+                    continue
+                if not msapi and name.lower() in self._msapi:
+                    continue
+                res.append(self.find(name))
+        return deduplicate(res)
+
+    """
+    def binaries_(self, system = False, msapi = False):
+
         if system:
             return self._pool[:]
-        return [item for item in self._pool if item.name.lower() not in self._system]
+        if msapi:
+            return [item for item in self._pool if item.name.lower() not in self._system]
+        return [item for item in self._pool if item.name.lower() not in self._system and item.name.lower() not in self._msapi]
+    """
 
     def vcruntime(self):
         return self._vcruntime
@@ -495,8 +560,9 @@ def update_config(config, args):
     if args.version_header:
         config['version_header'] = args.version_header
 
-    config['no_vcredist'] = args.no_vcredist
     config['unix_dirs'] = args.unix_dirs
+    config['vcredist'] = args.vcredist
+    config['msapi'] = args.msapi
 
     if args.data is not None:
 
@@ -676,7 +742,9 @@ def resolve_binaries(logger, config):
                 continue
             extra_paths.append(dirname(binary.path))
 
-    search_paths = os.environ['PATH'].split(";") + extra_paths
+    search_paths = extra_paths + os.environ['PATH'].split(";")
+
+    #search_paths.append('C:\\Windows\\System32\\downlevel')
 
     debug_print(config)
 
@@ -687,19 +755,21 @@ def resolve_binaries(logger, config):
         ]
         search_paths += extra_paths
 
-    #print(search_paths)
-
     resolver = Resolver(search_paths, ['.dll', '.exe'], config.get('msys_root'))
 
     if is_gtk:
         helpers = [resolver.resolve(name, logger) for name in ['gspawn-win64-helper.exe', 'gspawn-win64-helper-console.exe']]
         config['bin'] += helpers
 
-    pool = BinariesPool(binaries, resolver, logger)
+    pool = BinariesPool(binaries, resolver, config, logger)
 
     meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt_gui=is_qt_gui, qt_debug=is_qt_debug, vcruntime=pool.vcruntime(), gtk=is_gtk)
     debug_print(meta)
-    return pool.binaries(), meta
+
+    system = False
+    msapi = config['msapi'] == 'dll'
+
+    return pool.binaries(binaries, system, msapi), meta
 
 def bump_version(config, args, logger):
 
@@ -849,7 +919,7 @@ def inno_script(config, logger, binaries, meta):
             'Tasks': 'desktopicon'
         })
 
-    if meta.vcruntime and config['no_vcredist'] == False:
+    if meta.vcruntime and config['vcredist'] == 'exe':
 
         if meta.amd64:
             vcredist = config['vcredist64']
@@ -858,34 +928,11 @@ def inno_script(config, logger, binaries, meta):
 
         script['Files'].append({'Source':vcredist, 'DestDir': '{tmp}', 'Flags': 'dontcopy'})
 
-        script['Code'].append("""function VC2017RedistNeedsInstall: Boolean;
-var 
-  Version: String;
-begin
-  if RegQueryStringValue(HKEY_LOCAL_MACHINE,
-       'SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64', 'Version', Version) then
-  begin
-    // Is the installed version at least 14.14 ? 
-    Log('VC Redist Version check : found ' + Version);
-    Result := (CompareStr(Version, 'v14.14.26429.03')<0);
-  end
-  else 
-  begin
-    // Not even an old version installed
-    Result := True;
-  end;
-  if (Result) then
-  begin
-    ExtractTemporaryFile('{}');
-  end;
-end;""".format(os.path.basename(vcredist)))
-
         script['Run'].append({
             'Filename': os.path.join("{tmp}", os.path.basename(vcredist)),
-            'StatusMsg': "Installing Microsoft Visual C++ 2015-2019 Redistributable (x64) - 14.29.30037",
+            'StatusMsg': "Installing Microsoft Visual C++ 2015-2019 Redistributable",
             'Parameters': "/quiet",
-            'Check': 'VC2017RedistNeedsInstall',
-            'Flags': 'waituntilterminated'
+            'Flags': 'postinstall'
         })
 
     path = os.path.join(os.getcwd(), 'setup.iss')
@@ -950,6 +997,14 @@ def collect(config, logger, binaries, meta, dry_run, dest, skip):
     #print(binaries)
 
     for b in binaries:
+
+        if b.path is None:
+            #print("skip", b.name)
+            continue
+
+        if  b.name.lower().startswith('vcruntime') and config['vcredist'] != 'dll':
+            continue
+
         if b.dest is None:
             dest = os.path.join(base_bin, os.path.basename(b.path))
         else:
@@ -979,13 +1034,11 @@ def collect(config, logger, binaries, meta, dry_run, dest, skip):
                 dest = os.path.join(base, os.path.basename(item))
                 shutil_copy(item, dest)
 
-    if meta.vcruntime and config['no_vcredist'] == False:
-
+    if meta.vcruntime and config['vcredist'] == 'exe':
         if meta.amd64:
             vcredist = config['vcredist64']
         else:
             vcredist = config['vcredist32']
-
         dest = os.path.join(base, os.path.basename(vcredist))
         shutil_copy(vcredist, dest)
 
@@ -1217,13 +1270,17 @@ def write_graph(binaries, meta, output, skip_system, show_graph):
     with open(output, 'w', encoding='utf-8') as f:
         f.write(digraph)
 
+def clear_cache():
+    path = os.path.join(os.getenv('APPDATA'), "mugideploy", "pe-cache.json")
+    os.remove(path)
+
 def main():
 
     colorama_init()
 
     parser = argparse.ArgumentParser(prog='mugideploy')
 
-    parser.add_argument('command', choices=['update', 'find', 'list', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins'])
+    parser.add_argument('command', choices=['update', 'find', 'list', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins', 'clear-cache'])
     
     parser.add_argument('--bin', nargs='+')
     parser.add_argument('--app')
@@ -1239,7 +1296,11 @@ def main():
     parser.add_argument('--inno-compiler', help='Path to Inno Setup Compiler compil32.exe (including name)')
     parser.add_argument('--vcredist32', help='Path to Microsoft Visual C++ Redistributable x86')
     parser.add_argument('--vcredist64', help='Path to Microsoft Visual C++ Redistributable x64')
-    parser.add_argument('--no-vcredist', action='store_true', help='Do not include Visual C++ Redistributable')
+    #parser.add_argument('--no-vcredist', action='store_true', help='Do not include Visual C++ Redistributable')
+
+    parser.add_argument('--vcredist', choices=['dll', 'exe', 'none'], default='none')
+    parser.add_argument('--msapi', choices=['dll', 'none'], default='none')
+
     parser.add_argument('--msys-root', help='Msys root')
     parser.add_argument('--msystem', choices=MSYSTEMS, help='msystem')
     parser.add_argument('--unix-dirs', action='store_true', help='bin var etc dirs')
@@ -1328,6 +1389,10 @@ def main():
     elif args.command == 'build':
 
         build(logger, config)
+
+    elif args.command == 'clear-cache':
+
+        clear_cache()
 
 
 if __name__ == "__main__":
