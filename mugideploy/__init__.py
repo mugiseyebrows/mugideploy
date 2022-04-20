@@ -1,3 +1,4 @@
+import textwrap
 import pefile
 import os
 import json
@@ -12,6 +13,7 @@ from importlib.machinery import SourceFileLoader
 from dataclasses import dataclass
 from collections import defaultdict
 import zipfile
+from urllib.parse import quote as urlquote
 
 # TODO do not store (optionally) plugins-path
 # TODO update --license
@@ -248,8 +250,6 @@ class PEReader:
 class BinariesPool:
     def __init__(self, paths, resolver: Resolver, config, logger):
 
-        print(config)
-
         vcruntime = False
         pool = [Binary(os.path.basename(path), path) if isinstance(path, str) else path for path in paths]
         i = 0
@@ -303,31 +303,46 @@ class BinariesPool:
             if item.name.lower() == name:
                 return item
 
-    def binaries(self, binaries, system = False, msapi = False):
+    def is_system(self, binary):
+        if isinstance(binary, str):
+            binary = self.find(binary)
+        return binary.name.lower() in self._system
+
+    def is_msapi(self, binary):
+        if isinstance(binary, str):
+            if binary.lower().startswith('api-ms'):
+                return True
+            binary = self.find(binary)
+        return binary.name.lower() in self._msapi or binary.name.lower().startswith('api-ms')
+
+    def is_vcruntime(self, binary):
+        if isinstance(binary, str):
+            binary = self.find(binary)
+        return binary.name.lower().startswith('vcruntime')
+
+    def binaries(self, binaries, system = False, msapi = False, vcruntime = True):
         res = []
-        for item in binaries:
+
+        queue = binaries[:]
+        found = set()
+
+        while len(queue):
+            item = queue.pop(0)
             if isinstance(item, str):
                 item = self.find(item)
-            res.append(item)
-            if item.dependencies is None:
+            if item.name.lower() in found:
                 continue
+            res.append(item)
+            found.add(item.name.lower())
             for name in item.dependencies:
                 if not system and name.lower() in self._system:
                     continue
                 if not msapi and name.lower() in self._msapi:
                     continue
-                res.append(self.find(name))
-        return deduplicate(res)
-
-    """
-    def binaries_(self, system = False, msapi = False):
-
-        if system:
-            return self._pool[:]
-        if msapi:
-            return [item for item in self._pool if item.name.lower() not in self._system]
-        return [item for item in self._pool if item.name.lower() not in self._system and item.name.lower() not in self._msapi]
-    """
+                if not vcruntime and name.lower().startswith('vcruntime'):
+                    continue
+                queue.append(name)
+        return res
 
     def vcruntime(self):
         return self._vcruntime
@@ -561,8 +576,10 @@ def update_config(config, args):
         config['version_header'] = args.version_header
 
     config['unix_dirs'] = args.unix_dirs
-    config['vcredist'] = args.vcredist
+    config['vcruntime'] = args.vcruntime
     config['msapi'] = args.msapi
+    config['system'] = args.system
+    config['ace'] = args.ace
 
     if args.data is not None:
 
@@ -766,10 +783,11 @@ def resolve_binaries(logger, config):
     meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt_gui=is_qt_gui, qt_debug=is_qt_debug, vcruntime=pool.vcruntime(), gtk=is_gtk)
     debug_print(meta)
 
-    system = False
+    system = config['system'] == 'dll'
     msapi = config['msapi'] == 'dll'
+    vcruntime = config['vcruntime'] == 'dll'
 
-    return pool.binaries(binaries, system, msapi), meta
+    return pool.binaries(binaries, system, msapi, vcruntime), meta, pool
 
 def bump_version(config, args, logger):
 
@@ -846,7 +864,8 @@ def inno_script(config, logger, binaries, meta):
         'Compression': 'lzma2',
         'SolidCompression': 'yes',
         'OutputDir': '.',
-        'OutputBaseFilename': config["app"] + '-' + config["version"]
+        'OutputBaseFilename': config["app"] + '-' + config["version"],
+        'RestartIfNeededByRun': 'no',
     }
 
     if meta.amd64:
@@ -919,21 +938,45 @@ def inno_script(config, logger, binaries, meta):
             'Tasks': 'desktopicon'
         })
 
-    if meta.vcruntime and config['vcredist'] == 'exe':
+    if meta.vcruntime and config['vcruntime'] == 'exe':
 
         if meta.amd64:
             vcredist = config['vcredist64']
         else:
             vcredist = config['vcredist32']
 
-        script['Files'].append({'Source':vcredist, 'DestDir': '{tmp}', 'Flags': 'dontcopy'})
+        script['Files'].append({'Source':vcredist, 'DestDir': '{tmp}'})
 
         script['Run'].append({
             'Filename': os.path.join("{tmp}", os.path.basename(vcredist)),
             'StatusMsg': "Installing Microsoft Visual C++ 2015-2019 Redistributable",
-            'Parameters': "/quiet",
-            'Flags': 'postinstall'
+            'Parameters': "/quiet /norestart",
         })
+
+    if config['ace'] != 'none':
+
+        # https://stackoverflow.com/questions/35231455/inno-setup-section-run-with-condition
+        # https://stackoverflow.com/questions/12951327/inno-setup-check-if-file-exist-in-destination-or-else-if-doesnt-abort-the-ins
+
+        if meta.amd64:
+            ace_path = config['ace64']
+        else:
+            ace_path = config['ace32']
+        
+        script['Files'].append({'Source':ace_path, 'DestDir': '{tmp}'})
+
+        script['Run'].append({
+            'Filename': os.path.join("{tmp}", os.path.basename(ace_path)),
+            'StatusMsg': "Installing Access Database Engine",
+            'Parameters': "/quiet /norestart",
+            'Check': 'ShouldInstallAce'
+        })
+
+        script['Code'].append(textwrap.dedent("""\
+            function ShouldInstallAce: Boolean;
+            begin
+                Result := Not FileExists(ExpandConstant('{commoncf}\microsoft shared\OFFICE14\ACECORE.DLL'))
+            end;"""))
 
     path = os.path.join(os.getcwd(), 'setup.iss')
     script.write(path)
@@ -1002,7 +1045,7 @@ def collect(config, logger, binaries, meta, dry_run, dest, skip):
             #print("skip", b.name)
             continue
 
-        if  b.name.lower().startswith('vcruntime') and config['vcredist'] != 'dll':
+        if  b.name.lower().startswith('vcruntime') and config['vcruntime'] != 'dll':
             continue
 
         if b.dest is None:
@@ -1034,7 +1077,7 @@ def collect(config, logger, binaries, meta, dry_run, dest, skip):
                 dest = os.path.join(base, os.path.basename(item))
                 shutil_copy(item, dest)
 
-    if meta.vcruntime and config['vcredist'] == 'exe':
+    if meta.vcruntime and config['vcruntime'] == 'exe':
         if meta.amd64:
             vcredist = config['vcredist64']
         else:
@@ -1083,7 +1126,7 @@ def inno_compile(config, logger):
 
     subprocess.run([compiler, '/cc', path], cwd = os.getcwd())
 
-def build(logger, config):
+def build(config, logger):
 
     toolchain = config.get('toolchain')
 
@@ -1163,7 +1206,7 @@ def find_inno_compiler():
     
 class GlobalConfig:
 
-    keys = ['vcredist32', 'vcredist64', 'inno_compiler', 'msys_root']
+    keys = ['vcredist32', 'vcredist64', 'inno_compiler', 'msys_root', 'ace32', 'ace64']
 
     def __init__(self):
         data = dict()
@@ -1230,22 +1273,32 @@ class PrettyNames:
         name_ = name.lower()
         return self._names[name_]
 
-def write_graph(binaries, meta, output, skip_system, show_graph):
+def write_graph(config, binaries, meta, pool: BinariesPool, output, show_graph):
 
     names = PrettyNames()
 
-    if skip_system:
-        skip = [name.lower() for name in os.listdir("C:\\windows\\system32") if os.path.splitext(name)[1].lower() == '.dll']
-    else:
-        skip = []
+    #print(config['system'])
+
+    def skip(binary):
+        if config['system'] != 'dll' and pool.is_system(binary):
+            return True
+        if config['vcruntime'] != 'dll' and pool.is_vcruntime(binary):
+            return True
+        if config['msapi'] != 'dll' and pool.is_msapi(binary):
+            return True
+        return False
 
     deps = set()
     for binary in binaries:
-        
-        name = binary.name
 
-        if name.lower() in skip:
+        if skip(binary):
             continue
+
+        if binary.path is None:
+            print("binary {} has no path".format(binary.name))
+            continue
+
+        name = binary.name
 
         name1 = binary.name
         name2 = os.path.basename(binary.path)
@@ -1256,7 +1309,7 @@ def write_graph(binaries, meta, output, skip_system, show_graph):
         #print("names", name1, name2, names.names(name))
 
         for dependancy in binary.dependencies:
-            if dependancy.lower() in skip:
+            if skip(dependancy):
                 continue
             deps.add((binary.name.lower(), dependancy.lower()))
             names[dependancy] = dependancy
@@ -1264,7 +1317,7 @@ def write_graph(binaries, meta, output, skip_system, show_graph):
     digraph = "digraph G {\nnode [shape=rect]\n" + "\n".join(['    "{}" -> "{}"'.format(names[name], names[dependancy]) for name, dependancy in deps]) + "\n}\n"
 
     if show_graph:
-        url = 'https://dreampuf.github.io/GraphvizOnline/#' + urllib.parse.quote(digraph)
+        url = 'https://dreampuf.github.io/GraphvizOnline/#' + urlquote(digraph)
         os.startfile(url)
 
     with open(output, 'w', encoding='utf-8') as f:
@@ -1296,10 +1349,18 @@ def main():
     parser.add_argument('--inno-compiler', help='Path to Inno Setup Compiler compil32.exe (including name)')
     parser.add_argument('--vcredist32', help='Path to Microsoft Visual C++ Redistributable x86')
     parser.add_argument('--vcredist64', help='Path to Microsoft Visual C++ Redistributable x64')
-    #parser.add_argument('--no-vcredist', action='store_true', help='Do not include Visual C++ Redistributable')
 
-    parser.add_argument('--vcredist', choices=['dll', 'exe', 'none'], default='none')
+    
+    parser.add_argument('--ace32', help='Path to Access Database Engine')
+    parser.add_argument('--ace64', help='Path to Access Database Engine')
+
+    parser.add_argument('--system', choices=['dll', 'none'], default='none')
+    parser.add_argument('--vcruntime', choices=['dll', 'exe', 'none'], default='none')
     parser.add_argument('--msapi', choices=['dll', 'none'], default='none')
+    parser.add_argument('--ace', choices=['exe', 'none'], default='none')
+
+    # https://en.wikipedia.org/wiki/Access_Database_Engine
+    # ace14 https://download.microsoft.com/download/3/5/C/35C84C36-661A-44E6-9324-8786B8DBE231/accessdatabaseengine_X64.exe
 
     parser.add_argument('--msys-root', help='Msys root')
     parser.add_argument('--msystem', choices=MSYSTEMS, help='msystem')
@@ -1315,7 +1376,6 @@ def main():
     # find, graph
     parser.add_argument('-o','--output', help='Path to save dependency tree or graph')
     # graph
-    parser.add_argument('--skip-system', action='store_true', help='Skip system32 libraries')
     parser.add_argument('--show', action='store_true', help='Show graph in browser')
 
     args = parser.parse_args()
@@ -1345,7 +1405,7 @@ def main():
             print("Specify ouput path")
             exit(1)
 
-        binaries, meta = resolve_binaries(logger, config)
+        binaries, meta, pool = resolve_binaries(logger, config)
         with open(args.output, 'w', encoding='utf-8') as f:
             json.dump(binaries, f, ensure_ascii=False, indent=1, cls=JSONEncoder)
 
@@ -1353,7 +1413,7 @@ def main():
 
         mutedLogger = MutedLogger()
 
-        binaries, meta = resolve_binaries(mutedLogger, config)
+        binaries, meta, pool = resolve_binaries(mutedLogger, config)
         for binary in binaries:
             print(binary.path)
 
@@ -1363,19 +1423,19 @@ def main():
             print("Specify ouput path")
             exit(1)
 
-        binaries, meta = resolve_binaries(logger, config)
-        write_graph(binaries, meta, args.output, args.skip_system, args.show)
+        binaries, meta, pool = resolve_binaries(logger, config)
+        write_graph(config, binaries, meta, pool, args.output, args.show)
 
     elif args.command == 'collect':
 
-        binaries, meta = resolve_binaries(logger, config)
+        binaries, meta, pool = resolve_binaries(logger, config)
         path = collect(config, logger, binaries, meta, args.dry_run, args.dest, args.skip)
         if args.zip:
             zip_dir(config, logger, path)
 
     elif args.command == 'inno-script':
 
-        binaries, meta = resolve_binaries(logger, config)
+        binaries, meta, pool = resolve_binaries(logger, config)
         inno_script(config, logger, binaries, meta)
         
     elif args.command == 'inno-compile':
@@ -1388,7 +1448,7 @@ def main():
 
     elif args.command == 'build':
 
-        build(logger, config)
+        build(config, logger)
 
     elif args.command == 'clear-cache':
 
