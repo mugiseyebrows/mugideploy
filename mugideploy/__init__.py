@@ -1007,7 +1007,10 @@ def collect(config, logger, binaries, meta, dry_run, dest, skip):
             #debug_print(src, dst)
             if os.path.basename(src) in skip:
                 return
-            shutil.copy(src, dst)
+            if os.path.realpath(src) != os.path.realpath(dst):
+                shutil.copy(src, dst)
+            else:
+                debug_print("{} == {}".format(src, dst))
         if verbose:
             logger.print_copied(src, dst)
 
