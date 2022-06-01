@@ -677,7 +677,7 @@ def is_qt_app(config):
         return cwd_contains_project_file()
 
     dependencies = [e.lower() for e in get_dependencies(first_bin)]
-    return len({'qt5core.dll','qt5cored.dll','qtcore4.dll','qtcored4.dll'}.intersection(dependencies)) > 0
+    return len({'qt6core.dll','qt6cored.dll','qt5core.dll','qt5cored.dll','qtcore4.dll','qtcored4.dll'}.intersection(dependencies)) > 0
 
 def test_amd64(path):
     pe = pefile.PE(path, fast_load=True)
@@ -689,6 +689,7 @@ class ResolveMetaData:
     qt: bool
     qt4: bool
     qt5: bool
+    qt6: bool
     qt_debug: bool
     gtk: bool
     qt_gui: bool
@@ -715,18 +716,22 @@ def resolve_binaries(logger, config):
 
     is_qt4 = len({'qtcore4.dll', 'qtcored4.dll'}.intersection(dependencies)) > 0
 
-    is_qt5 = len({'qt5core.dll', 'qt5cored.dll', 'qt5widgets.dll'}.intersection(dependencies)) > 0
+    is_qt5 = len({'qt5core.dll', 'qt5cored.dll', 'qt5widgets.dll', 'qt5widgetsd.dll'}.intersection(dependencies)) > 0
 
-    is_qt = is_qt4 or is_qt5
+    is_qt6 = len({'qt6core.dll', 'qt6cored.dll', 'qt6widgets.dll', 'qt6widgetsd.dll'}.intersection(dependencies)) > 0
+
+    is_qt = is_qt4 or is_qt5 or is_qt6
 
     is_qt_gui = len({
         'qtgui4.dll', 'qtguid4.dll',
-        'qt5gui.dll', 'qt5guid.dll', 'qt5widgets.dll'
+        'qt5gui.dll', 'qt5guid.dll', 'qt5widgets.dll',
+        'qt6gui.dll', 'qt6guid.dll', 'qt6widgets.dll',
     }.intersection(dependencies)) > 0
 
     is_qt_debug = len({
         'qtcored4.dll',
         'qt5cored.dll',
+        'qt6cored.dll',
     }.intersection(dependencies)) > 0
 
     if is_qt_gui and is_qt5:
@@ -780,7 +785,7 @@ def resolve_binaries(logger, config):
 
     pool = BinariesPool(binaries, resolver, config, logger)
 
-    meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt_gui=is_qt_gui, qt_debug=is_qt_debug, vcruntime=pool.vcruntime(), gtk=is_gtk)
+    meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt6=is_qt6, qt_gui=is_qt_gui, qt_debug=is_qt_debug, vcruntime=pool.vcruntime(), gtk=is_gtk)
     debug_print(meta)
 
     system = config['system'] == 'dll'
