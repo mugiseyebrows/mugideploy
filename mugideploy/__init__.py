@@ -734,7 +734,7 @@ def resolve_binaries(logger, config):
         'qt6cored.dll',
     }.intersection(dependencies)) > 0
 
-    if is_qt_gui and is_qt5:
+    if is_qt_gui and is_qt:
         if 'plugins' not in config:
             config['plugins'] = []
         if is_qt_debug:
