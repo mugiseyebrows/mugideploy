@@ -566,20 +566,8 @@ def update_config(config, args):
 
     set_config_value(config, 'toolchain', args)
 
-    if args.msystem:
-        config['msystem'] = args.msystem
-
-    if args.src:
-        config['src'] = args.src
-
-    if args.version_header:
-        config['version_header'] = args.version_header
-
-    config['unix_dirs'] = args.unix_dirs
-    config['vcruntime'] = args.vcruntime
-    config['msapi'] = args.msapi
-    config['system'] = args.system
-    config['ace'] = args.ace
+    for key in ['msystem', 'src', 'version_header', 'unix_dirs', 'vcruntime', 'msapi', 'system', 'ace']:
+        set_config_value(config, key, args)
 
     if args.data is not None:
 
@@ -1362,10 +1350,10 @@ def main():
     parser.add_argument('--ace32', help='Path to Access Database Engine')
     parser.add_argument('--ace64', help='Path to Access Database Engine')
 
-    parser.add_argument('--system', choices=['dll', 'none'], default='none')
-    parser.add_argument('--vcruntime', choices=['dll', 'exe', 'none'], default='none')
-    parser.add_argument('--msapi', choices=['dll', 'none'], default='none')
-    parser.add_argument('--ace', choices=['exe', 'none'], default='none')
+    parser.add_argument('--system', choices=['dll', 'none'])
+    parser.add_argument('--vcruntime', choices=['dll', 'exe', 'none'])
+    parser.add_argument('--msapi', choices=['dll', 'none'])
+    parser.add_argument('--ace', choices=['exe', 'none'])
 
     # https://en.wikipedia.org/wiki/Access_Database_Engine
     # ace14 https://download.microsoft.com/download/3/5/C/35C84C36-661A-44E6-9324-8786B8DBE231/accessdatabaseengine_X64.exe
@@ -1403,7 +1391,12 @@ def main():
         
         if args.changelog is not None:
             update_changelog(config, config['version'], args.changelog)
-        
+
+    set_default_value(config, 'system', 'none')
+    set_default_value(config, 'vcruntime', 'none')
+    set_default_value(config, 'msapi', 'none')
+    set_default_value(config, 'ace', 'none')
+    
     if args.command == 'update':
         pass
 
