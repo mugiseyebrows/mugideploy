@@ -176,13 +176,14 @@ class Resolver:
                 
                 items_ = [item for item in items if is_child_path(item, msys_root)]
 
-                debug_print('filtered', items, items_)
+                #debug_print('filtered', items, items_)
                 if len(items_) > 1:
                     logger.multiple_candidates(name, items_)
                 elif len(items_) == 1:
                     return items_[0]
                 else:
-                    debug_print('{} not found in {}'.format(name_, msys_root))
+                    #debug_print('{} not found in {}'.format(name_, msys_root))
+                    pass
 
             logger.multiple_candidates(name, items)
             #print("multiple choises for {}:\n{}\n".format(name, "\n".join(items)))
@@ -209,7 +210,7 @@ def get_dependencies(path):
     pe = pefile.PE(path, fast_load=True)
     pe.parse_data_directories(import_dllnames_only=True)
 
-    debug_print('pefile for {}'.format(path))
+    #debug_print('pefile for {}'.format(path))
 
     if not hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
         print('{} has no DIRECTORY_ENTRY_IMPORT'.format(path))
@@ -550,6 +551,9 @@ def set_config_value(config, key, args, default = None):
     if config.get(key) is None and default is not None:
         config[key] = default
 
+def set_default_value(config, key, value):
+    if config.get(key) is None:
+        config[key] = value
 
 def update_config(config, args):
 
@@ -558,7 +562,7 @@ def update_config(config, args):
     global_config.push(config)
     global_config.save()
 
-    debug_print('config', config)
+    #debug_print('config', config)
 
     set_config_value(config, 'app', args)
 
@@ -693,7 +697,7 @@ def resolve_binaries(logger, config):
 
     dependencies = [e.lower() for e in get_dependencies(config['bin'][0])]
 
-    debug_print('dependencies', dependencies)
+    #debug_print('dependencies', dependencies)
 
     is_gtk = False
     for dep in dependencies:
@@ -756,7 +760,7 @@ def resolve_binaries(logger, config):
 
     #search_paths.append('C:\\Windows\\System32\\downlevel')
 
-    debug_print(config)
+    #debug_print(config)
 
     if config.get('msystem') is not None:
         
@@ -774,7 +778,7 @@ def resolve_binaries(logger, config):
     pool = BinariesPool(binaries, resolver, config, logger)
 
     meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt6=is_qt6, qt_gui=is_qt_gui, qt_debug=is_qt_debug, vcruntime=pool.vcruntime(), gtk=is_gtk)
-    debug_print(meta)
+    #debug_print(meta)
 
     system = config['system'] == 'dll'
     msapi = config['msapi'] == 'dll'
