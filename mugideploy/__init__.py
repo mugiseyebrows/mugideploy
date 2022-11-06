@@ -729,10 +729,12 @@ def resolve_binaries(logger, config):
     if is_qt_gui and is_qt:
         if 'plugins' not in config:
             config['plugins'] = []
-        if is_qt_debug:
-            config['plugins'] += ['qwindowsvistastyled', 'qwindowsd']
-        else:
-            config['plugins'] += ['qwindowsvistastyle', 'qwindows']
+        
+        if is_qt5 or is_qt6:
+            if is_qt_debug:
+                config['plugins'] += ['qwindowsvistastyled', 'qwindowsd']
+            else:
+                config['plugins'] += ['qwindowsvistastyle', 'qwindows']
 
     binaries = config['bin']
 
