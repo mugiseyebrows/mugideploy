@@ -14,6 +14,9 @@ from dataclasses import dataclass
 from collections import defaultdict
 import zipfile
 from urllib.parse import quote as urlquote
+from urllib.request import urlretrieve
+import hashlib
+import sys
 
 # TODO do not store (optionally) plugins-path
 # TODO update --license
@@ -1210,10 +1213,12 @@ class GlobalConfig:
 
     keys = ['vcredist32', 'vcredist64', 'inno_compiler', 'msys_root', 'ace32', 'ace64']
 
+    downloadable = ['vcredist32', 'vcredist64', 'ace64']
+
     def __init__(self):
         data = dict()
         try:
-            data = read_json(self._path())
+            data = read_json(self._config_path())
             if data is None:
                 data = dict()
         except Exception:
@@ -1223,8 +1228,11 @@ class GlobalConfig:
         self._data = data
         self._changed = False
 
-    def _path(self):
-        return os.path.join(os.getenv('APPDATA'), "mugideploy", "mugideploy.json")
+    def _path(self, name):
+        return os.path.join(os.getenv('APPDATA'), "mugideploy", name)
+
+    def _config_path(self):
+        return self._path("mugideploy.json")
 
     def update(self, args):
         for k in self.keys:
@@ -1242,7 +1250,46 @@ class GlobalConfig:
     def save(self):
         if len(self._data) == 0 or not self._changed:
             return
-        write_json(self._path(), self._data)
+        write_json(self._config_path(), self._data)
+
+    def download(self, target, logger):
+
+        if target == 'vcredist32':
+            url = 'https://aka.ms/vs/17/release/vc_redist.x86.exe'
+            name = 'vc_redist.x86.exe'
+        elif target == 'vcredist64':
+            url = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
+            name = 'vc_redist.x64.exe'
+        elif target == 'ace64':
+            url = 'https://download.microsoft.com/download/3/5/C/35C84C36-661A-44E6-9324-8786B8DBE231/accessdatabaseengine_X64.exe'
+            name = 'accessdatabaseengine_X64.exe'
+        elif target == 'ace32':
+            raise Exception("Downloading ace32 is not supported yet") # todo download ace32
+        else:
+            raise Exception("Only one of {} can be downloaded".format(", ".join(self.downloadable)))
+
+        dest = self._path(name)
+        logger.print_info("downloading {} to {}".format(url, dest))
+
+        def reporthook(blocknum, bs, size):
+            if (blocknum % 16) == 0:
+                print(".", end="", flush=True)
+
+        urlretrieve(url, dest, reporthook=reporthook)
+        print("")
+        h = get_file_hash(dest)
+        print("file {}\nsize {}\nsha256 {}".format(dest, os.path.getsize(dest), h))
+        self._data[target] = dest
+        self._changed = True
+        self.save()
+
+
+def get_file_hash(filename, method = 'sha256'):
+    h = getattr(hashlib, method)()
+    with open(filename,"rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            h.update(byte_block)
+        return h.hexdigest()
 
 def zip_dir(config, logger, path):
     parent_dir = os.path.dirname(path)
@@ -1335,7 +1382,7 @@ def main():
 
     parser = argparse.ArgumentParser(prog='mugideploy')
 
-    parser.add_argument('command', choices=['update', 'find', 'list', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins', 'clear-cache'])
+    parser.add_argument('command', choices=['update', 'find', 'list', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins', 'clear-cache', 'download'])
     
     parser.add_argument('--bin', nargs='+')
     parser.add_argument('--app')
@@ -1380,7 +1427,7 @@ def main():
     # graph
     parser.add_argument('--show', action='store_true', help='Show graph in browser')
 
-    args = parser.parse_args()
+    args, extraArgs = parser.parse_known_args()
 
     debug_print(args)
 
@@ -1461,6 +1508,15 @@ def main():
 
         clear_cache()
 
+    elif args.command == 'download':
+
+        if len(extraArgs) == 1:
+            config = GlobalConfig()
+            config.download(extraArgs[0], logger)
+        elif len(extraArgs) == 0:
+            raise Exception("Specify download target: {}".format(", ".join(GlobalConfig.downloadable)))
+        else:
+            raise Exception("Specify one download target")
 
 if __name__ == "__main__":
     main()
