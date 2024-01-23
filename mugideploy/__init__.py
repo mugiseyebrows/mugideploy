@@ -498,10 +498,7 @@ def guess_app_and_version(config):
         config['app'] = os.path.splitext(os.path.basename(config['bin'][0]))[0]
 
 def makedirs(path):
-    try:
-        os.makedirs(path)
-    except:
-        pass
+    os.makedirs(path, exist_ok=True)
 
 def cdup(path, n):
     for _ in range(n):
@@ -983,7 +980,7 @@ def inno_script(config, logger, binaries, meta):
     path = os.path.join(os.getcwd(), 'setup.iss')
     script.write(path)
 
-def collect(config, logger, binaries, meta, dry_run, dest, skip):
+def collect(config, logger: Logger, binaries, meta, dry_run, dest, skip):
 
     if skip is None:
         skip = []
@@ -1000,25 +997,33 @@ def collect(config, logger, binaries, meta, dry_run, dest, skip):
         base_bin = base
 
     def shutil_copy(src, dst, verbose = True):
+        #print("shutil_copy", src, dst)
         if not dry_run:
             #debug_print(src, dst)
             if os.path.basename(src) in skip:
                 return
-            if os.path.realpath(src) != os.path.realpath(dst):
+            if os.path.realpath(src) == os.path.realpath(dst):
+                debug_print("{} == {}".format(src, dst))
+                return
+            if os.path.isdir(src):
+                copy_tree(src, dst, verbose=False)
+            elif os.path.isfile(src):
                 shutil.copy(src, dst)
             else:
-                debug_print("{} == {}".format(src, dst))
+                logger.print_error("{} is not a file nor a directory".format(src))
+                return
         if verbose:
             logger.print_copied(src, dst)
 
-    def copy_tree(src, dst):
+    def copy_tree(src, dst, verbose = True):
         for root, dirs, files in os.walk(src):
             rel_path = os.path.relpath(root, src)
             dst_ = os.path.join(dst, rel_path)
             makedirs(dst_)
             for f in files:
                 shutil_copy(os.path.join(root, f), os.path.join(dst_, f), False)
-        logger.print_copied(src, dst)
+        if verbose:
+            logger.print_copied(src, dst)
 
     def copy_tree_if(src, dst, cond):
         for root, dirs, files in os.walk(src):
