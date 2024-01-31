@@ -980,7 +980,7 @@ def inno_script(config, logger, binaries, meta):
     path = os.path.join(os.getcwd(), 'setup.iss')
     script.write(path)
 
-def collect(config, logger: Logger, binaries, meta, dry_run, dest, skip):
+def collect(config, logger: Logger, binaries, meta, dry_run, dest, skip, git_version = False):
 
     if skip is None:
         skip = []
@@ -1183,26 +1183,37 @@ def build(config, logger):
             subprocess.run(command, cwd=cwd)
 
 def version_int(version):
-    return ",".join((version.split(".") + ["0"] * 3)[:4])
+    if re.match("^[0-9.]+$", version):
+        cols = version.split(".")
+        while len(cols) < 4:
+            cols.append("0")
+        return ",".join(cols[:4])
+    return version_int("0.0.0.1")
 
 def run_version_script(config, logger):
-    path = os.path.join(os.getcwd(), 'version.py')
+    path = 'version.py'
     if os.path.exists(path):
         version = SourceFileLoader("version", path).load_module()
         version.main()
     else:
-        if 'version_header' in config:
-            path = config['version_header']
-        elif 'src' in config:
-            path = os.path.join(config['src'], 'version.h')
-        else:
-            error = '--version-header or --src required'
-            logger.print_error(error)
-            raise ValueError(error)
-        if not os.path.isfile(path):
-            error = '{} not exist'.format(path)
-            logger.print_error(error)
-            raise ValueError(error)
+        path = config.get('version_header')
+        if path is None:
+            if 'src' in config:
+                guesses = [
+                    os.path.join(config['src'], 'version.h'),
+                    os.path.join(config['src'], 'src', 'version.h')
+                ]
+            else:
+                guesses = [
+                    'version.h',
+                    os.path.join('src', 'version.h')
+                ]
+            for guess in guesses:
+                if os.path.exists(guess):
+                    path = guess
+                    break
+        if path is None:
+            ValueError("version.h not found, please cd into src dir or use --version-header or --src")
         with open(path, 'w', encoding='utf-8') as f:
             version = config['version']
             f.write("#define VERSION \"{}\"\n".format(version))
@@ -1426,6 +1437,7 @@ def main():
     parser.add_argument('--save', action='store_true')
     parser.add_argument('--dry-run', action='store_true', help="Do not copy files (collect command)")
     parser.add_argument('--zip', action='store_true', help='Zip collected data')
+    parser.add_argument('--git-version', action='store_true', help='Use git tag as version')
 
     # find, graph
     parser.add_argument('-o','--output', help='Path to save dependency tree or graph')
@@ -1441,6 +1453,16 @@ def main():
     config = read_config()
     update_config(config, args)
 
+    if args.git_version:
+        tags = subprocess.check_output(['git','tag','--points-at','HEAD']).decode('utf-8').split("\n")[0].rstrip()
+        if tags == '':
+            rev = subprocess.check_output(['git','rev-parse','--short','HEAD']).decode('utf-8').rstrip()
+            version = rev
+        else:
+            version = tags
+        config['version'] = version
+        run_version_script(config, logger)
+        
     if args.save or args.command == 'update':
 
         write_config(config)
