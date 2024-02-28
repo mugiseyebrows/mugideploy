@@ -1398,7 +1398,7 @@ def main():
 
     parser = argparse.ArgumentParser(prog='mugideploy')
 
-    parser.add_argument('command', choices=['update', 'find', 'list', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins', 'clear-cache', 'download'])
+    parser.add_argument('command', choices=['update', 'find', 'list', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins', 'clear-cache', 'download', 'version'])
     
     parser.add_argument('--bin', nargs='+')
     parser.add_argument('--app')
@@ -1452,6 +1452,9 @@ def main():
 
     config = read_config()
     update_config(config, args)
+
+    if args.command == 'version':
+        args.git_version = True
 
     if args.git_version:
         tags = subprocess.check_output(['git','tag','--points-at','HEAD']).decode('utf-8').split("\n")[0].rstrip()
