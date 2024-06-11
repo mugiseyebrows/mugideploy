@@ -357,10 +357,28 @@ class PluginsCollectionItem:
         self.path = path
         self.base = base
         self.isdir = isdir
+    def __repr__(self):
+        return "PluginsCollectionItem({}, {}, {}, {})".format(self.name, self.path, self.base, self.isdir)
+
+def to_debug_release(files):
+    debug = []
+    release = []
+    while len(files) > 0:
+        name = files.pop(0)
+        n, e = os.path.splitext(name)
+        named = n + 'd' + e
+        if named in files:
+            files.pop(files.index(named))
+            debug.append(named)
+            release.append(name)
+        else:
+            release.append(name)
+    return debug, release
 
 class PluginsCollection:
-    def __init__(self, paths):
+    def __init__(self, paths, is_debug):
         self._paths = paths
+        self._is_debug = is_debug
         collection = dict()
 
         aliases = {
@@ -384,11 +402,19 @@ class PluginsCollection:
                 collection[base] = []
                 for d in dirs:
                     collection[base].append(PluginsCollectionItem(d, os.path.join(root,d), path, True))
-                for f in files:
-                    """
-                    if f.lower().endswith('d.dll'):
-                        continue
-                    """
+
+                debug, release = to_debug_release(files)
+
+                #print("debug", debug)
+                #print("release", release)
+
+                if is_debug:
+                    files_ = debug
+                else:
+                    files_ = release
+
+                for f in files_:
+                    
                     if os.path.splitext(f)[1].lower() != '.dll':
                         continue
                     plugin_path = os.path.join(root,f)
@@ -400,6 +426,11 @@ class PluginsCollection:
                     base_ = os.path.basename(f)
                     collection[base_] = [PluginsCollectionItem(f, plugin_path, path, False)]
         self._collection = collection
+        """
+        for k, v in collection.items():
+            print(k)
+            print(v)
+        """
 
     def binaries(self, names):
         res = []
@@ -689,6 +720,8 @@ class ResolveMetaData:
 
 def resolve_binaries(logger, config):
 
+    #print("resolve_binaries config", config)
+
     if 'bin' not in config:
         logger.print_error('Specify binaries please')
         return
@@ -730,16 +763,23 @@ def resolve_binaries(logger, config):
         if 'plugins' not in config:
             config['plugins'] = []
         
-        if is_qt5 or is_qt6:
+        if is_qt5:
             if is_qt_debug:
                 config['plugins'] += ['qwindowsvistastyled', 'qwindowsd']
             else:
                 config['plugins'] += ['qwindowsvistastyle', 'qwindows']
+        elif is_qt6:
+            if is_qt_debug:
+                config['plugins'] += ['qmodernwindowsstyled', 'qwindowsd']
+            else:
+                config['plugins'] += ['qmodernwindowsstyle', 'qwindows']
+
+    #print("is_qt_debug", is_qt_debug)
 
     binaries = config['bin']
 
     if 'plugins' in config and len(config['plugins']):
-        collection = PluginsCollection(config['plugins-path'])
+        collection = PluginsCollection(config['plugins-path'], is_qt_debug)
         binaries += collection.binaries(config['plugins'])
 
     extra_paths = []
@@ -980,7 +1020,7 @@ def inno_script(config, logger, binaries, meta):
     path = os.path.join(os.getcwd(), 'setup.iss')
     script.write(path)
 
-def collect(config, logger: Logger, binaries, meta, dry_run, dest, skip, git_version = False):
+def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, git_version = False):
 
     if skip is None:
         skip = []
@@ -1049,24 +1089,28 @@ def collect(config, logger: Logger, binaries, meta, dry_run, dest, skip, git_ver
             
     #print(binaries)
 
-    for b in binaries:
+    for binary in binaries:
 
-        if b.path is None:
+        if binary.path is None:
             #print("skip", b.name)
             continue
 
+        """
         if  b.name.lower().startswith('vcruntime') and config['vcruntime'] != 'dll':
             continue
+        """
+        if skip_binary(config, pool, binary):
+            continue
 
-        if b.dest is None:
-            dest = os.path.join(base_bin, os.path.basename(b.path))
+        if binary.dest is None:
+            dest = os.path.join(base_bin, os.path.basename(binary.path))
         else:
-            dest = os.path.join(base_bin, b.dest, os.path.basename(b.path))
+            dest = os.path.join(base_bin, binary.dest, os.path.basename(binary.path))
 
         if not dry_run:
             makedirs(os.path.dirname(dest))
 
-        shutil_copy(b.path, dest)
+        shutil_copy(binary.path, dest)
 
     # changelog
     if 'src' in config:
@@ -1344,19 +1388,10 @@ def write_graph(config, binaries, meta, pool: BinariesPool, output, show_graph):
 
     #print(config['system'])
 
-    def skip(binary):
-        if config['system'] != 'dll' and pool.is_system(binary):
-            return True
-        if config['vcruntime'] != 'dll' and pool.is_vcruntime(binary):
-            return True
-        if config['msapi'] != 'dll' and pool.is_msapi(binary):
-            return True
-        return False
-
     deps = set()
     for binary in binaries:
 
-        if skip(binary):
+        if skip_binary(config, pool, binary):
             continue
 
         if binary.path is None:
@@ -1374,7 +1409,7 @@ def write_graph(config, binaries, meta, pool: BinariesPool, output, show_graph):
         #print("names", name1, name2, names.names(name))
 
         for dependancy in binary.dependencies:
-            if skip(dependancy):
+            if skip_binary(dependancy):
                 continue
             deps.add((binary.name.lower(), dependancy.lower()))
             names[dependancy] = dependancy
@@ -1391,6 +1426,15 @@ def write_graph(config, binaries, meta, pool: BinariesPool, output, show_graph):
 def clear_cache():
     path = os.path.join(os.getenv('APPDATA'), "mugideploy", "pe-cache.json")
     os.remove(path)
+
+def skip_binary(config, pool, binary):
+    if config['system'] != 'dll' and pool.is_system(binary):
+        return True
+    if config['vcruntime'] != 'dll' and pool.is_vcruntime(binary):
+        return True
+    if config['msapi'] != 'dll' and pool.is_msapi(binary):
+        return True
+    return False
 
 def main():
 
@@ -1457,9 +1501,18 @@ def main():
         args.git_version = True
 
     if args.git_version:
-        tags = subprocess.check_output(['git','tag','--points-at','HEAD']).decode('utf-8').split("\n")[0].rstrip()
+
+        git = shutil.which('git')
+        git_def = 'C:\\Program Files\\Git\\cmd\\git.exe'
+        if git is None and os.path.exists(git_def):
+            git = git_def
+        
+        if git is None:
+            raise ValueError("git not found")
+
+        tags = subprocess.check_output([git,'tag','--points-at','HEAD']).decode('utf-8').split("\n")[0].rstrip()
         if tags == '':
-            rev = subprocess.check_output(['git','rev-parse','--short','HEAD']).decode('utf-8').rstrip()
+            rev = subprocess.check_output([git,'rev-parse','--short','HEAD']).decode('utf-8').rstrip()
             version = rev
         else:
             version = tags
@@ -1498,7 +1551,10 @@ def main():
         mutedLogger = MutedLogger()
 
         binaries, meta, pool = resolve_binaries(mutedLogger, config)
+
         for binary in binaries:
+            if skip_binary(config, pool, binary):
+                continue
             print(binary.path)
 
     elif args.command == 'graph':
@@ -1513,7 +1569,7 @@ def main():
     elif args.command == 'collect':
 
         binaries, meta, pool = resolve_binaries(logger, config)
-        path = collect(config, logger, binaries, meta, args.dry_run, args.dest, args.skip)
+        path = collect(config, logger, binaries, meta, pool, args.dry_run, args.dest, args.skip)
         if args.zip:
             zip_dir(config, logger, path)
 
