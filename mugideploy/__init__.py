@@ -1408,11 +1408,11 @@ def write_graph(config, binaries, meta, pool: BinariesPool, output, show_graph):
 
         #print("names", name1, name2, names.names(name))
 
-        for dependancy in binary.dependencies:
-            if skip_binary(dependancy):
+        for dep_binary in binary.dependencies:
+            if skip_binary(config, pool, dep_binary):
                 continue
-            deps.add((binary.name.lower(), dependancy.lower()))
-            names[dependancy] = dependancy
+            deps.add((binary.name.lower(), dep_binary.lower()))
+            names[dep_binary] = dep_binary
     
     digraph = "digraph G {\nnode [shape=rect]\n" + "\n".join(['    "{}" -> "{}"'.format(names[name], names[dependancy]) for name, dependancy in deps]) + "\n}\n"
 
