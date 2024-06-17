@@ -1234,34 +1234,52 @@ def version_int(version):
         return ",".join(cols[:4])
     return version_int("0.0.0.1")
 
-def run_version_script(config, logger):
-    path = 'version.py'
-    if os.path.exists(path):
-        version = SourceFileLoader("version", path).load_module()
-        version.main()
+def find_version_header(config):
+    path = config.get('version_header')
+    if path is not None:
+        return path
+    if 'src' in config:
+        guesses = [
+            os.path.join(config['src'], 'version.h'),
+            os.path.join(config['src'], 'src', 'version.h')
+        ]
     else:
-        path = config.get('version_header')
-        if path is None:
-            if 'src' in config:
-                guesses = [
-                    os.path.join(config['src'], 'version.h'),
-                    os.path.join(config['src'], 'src', 'version.h')
-                ]
-            else:
-                guesses = [
-                    'version.h',
-                    os.path.join('src', 'version.h')
-                ]
-            for guess in guesses:
-                if os.path.exists(guess):
-                    path = guess
-                    break
-        if path is None:
-            ValueError("version.h not found, please cd into src dir or use --version-header or --src")
-        with open(path, 'w', encoding='utf-8') as f:
-            version = config['version']
-            f.write("#define VERSION \"{}\"\n".format(version))
-            f.write("#define VERSION_INT {}\n".format(version_int(version)))
+        cwd = os.path.realpath('.')
+        guesses = [
+            os.path.join(cwd, 'version.h'),
+            os.path.join('src', 'version.h')
+        ]
+        if 'build' in os.path.basename(cwd):
+            guesses.append(os.path.join(cwd, '..', 'version.h'))
+            guesses.append(os.path.join(cwd, '..', 'src', 'version.h'))
+    for path in guesses:
+        if os.path.exists(path):
+            return path
+    raise ValueError("version.h not found, please use --version-header or --src")
+
+def find_cmakelists(config):
+    if 'src' in config:
+        guesses = [
+            os.path.join(config['src'], 'CMakeLists.txt'),
+        ]
+    else:
+        cwd = os.path.realpath('.')
+        guesses = [
+            os.path.join(cwd, 'CMakeLists.txt'),
+            os.path.join(os.path.dirname(cwd), 'CMakeLists.txt'),
+        ]
+    for guess in guesses:
+        if os.path.exists(guess):
+            return guess
+    raise ValueError("CMakeLists.txt not found, please use --src")
+
+def write_version(config, logger: Logger):
+    path = find_version_header(config)
+    with open(path, 'w', encoding='utf-8') as f:
+        version = config['version']
+        f.write("#define VERSION \"{}\"\n".format(version))
+        f.write("#define VERSION_INT {}\n".format(version_int(version)))
+    logger.print_info("version {} writen to {}".format(version, path))
 
 def find_inno_compiler():
     return existing([
@@ -1482,6 +1500,7 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help="Do not copy files (collect command)")
     parser.add_argument('--zip', action='store_true', help='Zip collected data')
     parser.add_argument('--git-version', action='store_true', help='Use git tag as version')
+    parser.add_argument('--cmake-version', action='store_true', help='Read version from CMakeLists.txt')
 
     # find, graph
     parser.add_argument('-o','--output', help='Path to save dependency tree or graph')
@@ -1512,18 +1531,31 @@ def main():
 
         tags = subprocess.check_output([git,'tag','--points-at','HEAD']).decode('utf-8').split("\n")[0].rstrip()
         if tags == '':
-            rev = subprocess.check_output([git,'rev-parse','--short','HEAD']).decode('utf-8').rstrip()
+            rev = subprocess.check_output([git, 'rev-parse','--short','HEAD']).decode('utf-8').rstrip()
             version = rev
         else:
             version = tags
         config['version'] = version
-        run_version_script(config, logger)
-        
+        #run_version_script(config, logger)
+        write_version(config, logger)
+
+    if args.cmake_version:
+        path = find_cmakelists(config)
+        rx = re.compile('project\\(.*VERSION\\s+([^\\s]+)', re.IGNORECASE)
+        with open(path, encoding='utf-8') as f:
+            for line in f:
+                m = rx.search(line)
+                if m:
+                    config['version'] = m.group(1)
+                    break
+        if config.get('version') is not None:
+            write_version(config, logger)
+            
     if args.save or args.command == 'update':
 
         write_config(config)
         if args.version is not None:
-            run_version_script(config, logger)
+            write_version(config, logger)
         
         if args.changelog is not None:
             update_changelog(config, config['version'], args.changelog)
