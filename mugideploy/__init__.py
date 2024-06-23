@@ -720,10 +720,10 @@ class ResolveMetaData:
 
 def resolve_binaries(logger, config):
 
-    #print("resolve_binaries config", config)
-
     if 'bin' not in config:
         logger.print_error('Specify binaries please')
+        if isinstance(logger, MutedLogger):
+            raise ValueError("Specify binaries please")
         return
 
     logger.print_info("Resolving imports\n")
@@ -1271,8 +1271,9 @@ def find_cmakelists(config):
     for guess in guesses:
         if os.path.exists(guess):
             return guess
-    raise ValueError("CMakeLists.txt not found, please use --src")
+    #raise ValueError("CMakeLists.txt not found, please use --src")
 
+"""
 def write_version(config, logger: Logger):
     path = find_version_header(config)
     with open(path, 'w', encoding='utf-8') as f:
@@ -1280,6 +1281,7 @@ def write_version(config, logger: Logger):
         f.write("#define VERSION \"{}\"\n".format(version))
         f.write("#define VERSION_INT {}\n".format(version_int(version)))
     logger.print_info("version {} writen to {}".format(version, path))
+"""
 
 def find_inno_compiler():
     return existing([
@@ -1454,6 +1456,18 @@ def skip_binary(config, pool, binary):
         return True
     return False
 
+def parse_cmakelists_for_version(config):
+    path = find_cmakelists(config)
+    if path is None:
+        return
+    rx = re.compile('project\\(.*VERSION\\s+([^\\s]+)', re.IGNORECASE)
+    with open(path, encoding='utf-8') as f:
+        for line in f:
+            m = rx.search(line)
+            if m:
+                config['version'] = m.group(1)
+                break
+
 def main():
 
     colorama_init()
@@ -1469,7 +1483,7 @@ def main():
     parser.add_argument('--plugins', nargs='+')
     parser.add_argument('--plugins-path', nargs='+')
     parser.add_argument('--toolchain', help="One of: mingw32, vs, cmake (build command)")
-    parser.add_argument('--changelog')
+    #parser.add_argument('--changelog')
     parser.add_argument('--skip', nargs='+', help="Names to skip on collect")
     parser.add_argument('--dest', help="destination path or path template", default='%app%-%version%-%arch%')
 
@@ -1500,7 +1514,7 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help="Do not copy files (collect command)")
     parser.add_argument('--zip', action='store_true', help='Zip collected data')
     parser.add_argument('--git-version', action='store_true', help='Use git tag as version')
-    parser.add_argument('--cmake-version', action='store_true', help='Read version from CMakeLists.txt')
+    #parser.add_argument('--cmake-version', action='store_true', help='Read version from CMakeLists.txt')
 
     # find, graph
     parser.add_argument('-o','--output', help='Path to save dependency tree or graph')
@@ -1509,12 +1523,19 @@ def main():
 
     args, extraArgs = parser.parse_known_args()
 
-    debug_print(args)
-
     logger = Logger()
+
+    debug_print(args)
+    for arg in extraArgs:
+        if os.path.splitext(arg)[1].lower() in ['.dll', '.exe']:
+            logger.print_info("unexpected argument {}, did you mean --bin {}?".format(arg, arg))
+        else:
+            logger.print_info("unexpected argument {}".format(arg))
 
     config = read_config()
     update_config(config, args)
+
+    parse_cmakelists_for_version(config)
 
     if args.command == 'version':
         args.git_version = True
@@ -1537,28 +1558,19 @@ def main():
             version = tags
         config['version'] = version
         #run_version_script(config, logger)
-        write_version(config, logger)
+        #write_version(config, logger)
 
-    if args.cmake_version:
-        path = find_cmakelists(config)
-        rx = re.compile('project\\(.*VERSION\\s+([^\\s]+)', re.IGNORECASE)
-        with open(path, encoding='utf-8') as f:
-            for line in f:
-                m = rx.search(line)
-                if m:
-                    config['version'] = m.group(1)
-                    break
-        if config.get('version') is not None:
-            write_version(config, logger)
-            
     if args.save or args.command == 'update':
 
         write_config(config)
+        """
         if args.version is not None:
             write_version(config, logger)
-        
+        """
+        """
         if args.changelog is not None:
             update_changelog(config, config['version'], args.changelog)
+        """
 
     set_default_value(config, 'system', 'none')
     set_default_value(config, 'vcruntime', 'none')
