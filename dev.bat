@@ -1,0 +1,1 @@
+mugisync D:\dev\mugideploy\mugideploy C:\Users\Stanislav\miniconda3\Lib\site-packages\mugideploy -i *.py
