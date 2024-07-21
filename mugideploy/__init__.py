@@ -852,7 +852,7 @@ def bump_version(config, args, logger):
         update_changelog(config, config['version'], args.changelog)
 
     write_config(config)
-    run_version_script(config, logger)
+    #run_version_script(config, logger)
 
 class InnoScript(dict):
 
