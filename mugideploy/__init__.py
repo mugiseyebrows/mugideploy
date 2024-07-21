@@ -774,7 +774,18 @@ def resolve_binaries(logger, config):
             else:
                 config['plugins'] += ['qmodernwindowsstyle', 'qwindows']
 
-    #print("is_qt_debug", is_qt_debug)
+    if is_qt5 or is_qt6:
+        if is_qt5:
+            qmake = shutil.which('qmake')
+        elif is_qt6:
+            qmake = shutil.which('qmake')
+            if qmake is None:
+                qmake = shutil.which('qmake6')
+        if qmake:
+            path = subprocess.check_output([qmake, '-query', 'QT_INSTALL_PLUGINS']).decode('utf-8').strip()
+            if 'plugins-path' not in config:
+                config['plugins-path'] = []
+            config['plugins-path'].append(path)
 
     binaries = config['bin']
 
