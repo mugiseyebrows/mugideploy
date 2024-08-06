@@ -37,6 +37,9 @@ if 'DEBUG_MUGIDEPLOY' in os.environ and os.environ['DEBUG_MUGIDEPLOY'] == "1":
 else:
     debug_print = debug_print_off
 
+def noext_basename(path):
+    return os.path.splitext(os.path.basename(path))[0]
+
 class Logger():
 
     def __init__(self):
@@ -52,18 +55,21 @@ class Logger():
     def print_copied(self, src, dst):
         if src is not None:
             self._src.append(src)
-
         if dst is not None:
             self._dst.append(dst)
 
-    def flush_copied(self):
-        print("\nSources")
+    def flush_copied(self, src_label = "Sources", dst_label = "Collected", abspath = False):
+        print("\n" + src_label)
         for item in self._src:
             print(Fore.GREEN + Style.BRIGHT + item + Fore.RESET + Style.NORMAL)
-        print("\nCollected")
+        print("\n" + dst_label)
         cwd = os.getcwd()
+        if abspath:
+            getpath = lambda item: item
+        else:
+            getpath = lambda item: os.path.relpath(item, cwd)
         for item in self._dst:
-            print(Fore.GREEN + Style.BRIGHT + os.path.relpath(item, cwd) + Fore.RESET + Style.NORMAL)
+            print(Fore.GREEN + Style.BRIGHT + getpath(item) + Fore.RESET + Style.NORMAL)
         self._src = []
         self._dst = []
 
@@ -219,7 +225,9 @@ def get_dependencies(path):
         print('{} has no DIRECTORY_ENTRY_IMPORT'.format(path))
         return []
     else:
-        return [name for name in [item.dll.decode('utf-8') for item in pe.DIRECTORY_ENTRY_IMPORT] if name.lower().endswith('.dll')]
+        res = [name for name in [item.dll.decode('utf-8') for item in pe.DIRECTORY_ENTRY_IMPORT] if name.lower().endswith('.dll')]
+        #print("get_dependencies", path, res)
+        return res
 
 class PEReader:
     def __init__(self):
@@ -255,7 +263,7 @@ class BinariesPool:
     def __init__(self, paths, resolver: Resolver, config, logger):
 
         vcruntime = False
-        pool = [Binary(os.path.basename(path), path) if isinstance(path, str) else path for path in paths]
+        pool: list[Binary] = [Binary(os.path.basename(path), path) if isinstance(path, str) else path for path in paths]
         i = 0
 
         skip_list = set(['msvcp140.dll','msvcr90.dll'])
@@ -301,7 +309,7 @@ class BinariesPool:
 
         reader.save()
     
-    def find(self, name):
+    def find(self, name) -> Binary | None:
         name = os.path.basename(name).lower()
         for item in self._pool:
             if item.name.lower() == name:
@@ -324,8 +332,8 @@ class BinariesPool:
             binary = self.find(binary)
         return binary.name.lower().startswith('vcruntime')
 
-    def binaries(self, binaries, system = False, msapi = False, vcruntime = True):
-        res = []
+    def binaries(self, binaries: list[Binary | str], system = False, msapi = False, vcruntime = True) -> list[Binary]:
+        res: list[Binary] = []
 
         queue = binaries[:]
         found = set()
@@ -379,7 +387,7 @@ class PluginsCollection:
     def __init__(self, paths, is_debug):
         self._paths = paths
         self._is_debug = is_debug
-        collection = dict()
+        collection: dict[str, list[PluginsCollectionItem]] = dict()
 
         aliases = {
             'qsqlite': 'sqlite',
@@ -432,7 +440,15 @@ class PluginsCollection:
             print(v)
         """
 
-    def binaries(self, names):
+    def is_plugin(self, path):
+        name = os.path.splitext(os.path.basename(path))[0]
+        if name in self._collection:
+            item = self._collection[name][0]
+            if os.path.samefile(item.path, path):
+                return True
+        return False
+
+    def binaries(self, names) -> list[Binary]:
         res = []
         i = 0
         names_ = names[:]
@@ -718,7 +734,7 @@ class ResolveMetaData:
     qt_gui: bool
     vcruntime: bool
 
-def resolve_binaries(logger, config):
+def resolve_binaries(logger, config) -> tuple[list[Binary], ResolveMetaData, BinariesPool]:
 
     if 'bin' not in config:
         logger.print_error('Specify binaries please')
@@ -787,11 +803,26 @@ def resolve_binaries(logger, config):
                 config['plugins-path'] = []
             config['plugins-path'].append(path)
 
-    binaries = config['bin']
+    binaries: list[str] = config['bin']
 
-    if 'plugins' in config and len(config['plugins']):
+    # print("plugins-path", config['plugins-path'])
+
+    if is_qt:
+        # Check if --bin is a plugin
+        if 'plugins' in config:
+            plugins = config['plugins']
+        else:
+            plugins = []
         collection = PluginsCollection(config['plugins-path'], is_qt_debug)
-        binaries += collection.binaries(config['plugins'])
+        not_plugins = []
+        for binary in binaries:
+            if collection.is_plugin(binary):
+                plugins.append(noext_basename(binary))
+            else:
+                not_plugins.append(binary)
+        binaries = not_plugins + collection.binaries(plugins)
+    else:
+        pass
 
     extra_paths = []
 
@@ -1037,6 +1068,9 @@ def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, g
         skip = []
 
     arch = "win64" if meta.amd64 else "win32"
+
+    if dest is None:
+        dest = '%app%-%version%-%arch%'
 
     base = dest.replace('%app%', config["app"]).replace('%version%',config["version"]).replace('%arch%',arch)
 
@@ -1485,7 +1519,7 @@ def main():
 
     parser = argparse.ArgumentParser(prog='mugideploy')
 
-    parser.add_argument('command', choices=['update', 'find', 'list', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins', 'clear-cache', 'download', 'version'])
+    parser.add_argument('command', choices=['update', 'find', 'list', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins', 'clear-cache', 'download', 'version', 'copy-dep'])
     
     parser.add_argument('--bin', nargs='+')
     parser.add_argument('--app')
@@ -1496,12 +1530,11 @@ def main():
     parser.add_argument('--toolchain', help="One of: mingw32, vs, cmake (build command)")
     #parser.add_argument('--changelog')
     parser.add_argument('--skip', nargs='+', help="Names to skip on collect")
-    parser.add_argument('--dest', help="destination path or path template", default='%app%-%version%-%arch%')
+    parser.add_argument('--dst', help="destination path or path template (collect) or destination dir (copy command)")
 
     parser.add_argument('--inno-compiler', help='Path to Inno Setup Compiler compil32.exe (including name)')
     parser.add_argument('--vcredist32', help='Path to Microsoft Visual C++ Redistributable x86')
     parser.add_argument('--vcredist64', help='Path to Microsoft Visual C++ Redistributable x64')
-
     
     parser.add_argument('--ace32', help='Path to Access Database Engine')
     parser.add_argument('--ace64', help='Path to Access Database Engine')
@@ -1522,7 +1555,7 @@ def main():
     parser.add_argument('--src', help='Path to sources')
 
     parser.add_argument('--save', action='store_true')
-    parser.add_argument('--dry-run', action='store_true', help="Do not copy files (collect command)")
+    parser.add_argument('--dry-run', action='store_true', help="Do not copy files (collect and copy command)")
     parser.add_argument('--zip', action='store_true', help='Zip collected data')
     parser.add_argument('--git-version', action='store_true', help='Use git tag as version')
     #parser.add_argument('--cmake-version', action='store_true', help='Read version from CMakeLists.txt')
@@ -1612,6 +1645,32 @@ def main():
                 continue
             print(binary.path)
 
+    elif args.command == 'copy-dep':
+
+        dst = args.dst
+        if dst is None:
+            raise ValueError("specify --dst")
+
+        if not isinstance(config.get('bin'), list):
+            raise ValueError("specify binaries")
+
+        binaries, meta, pool = resolve_binaries(logger, config)
+
+        for i, binary in enumerate(binaries):
+            #print(i, binary.name, binary.isplugin)
+            if binary.isplugin or pool.is_system(binary) or pool.is_msapi(binary):
+                continue
+            file_dst = os.path.join(dst, binary.name)
+            if os.path.isfile(file_dst):
+                pass
+            else:
+                if args.dry_run:
+                    pass
+                else:
+                    shutil.copy(binary.path, file_dst)
+                logger.print_copied(binary.path, file_dst)
+        logger.flush_copied("Source", "Destination", os.path.isabs(dst))
+
     elif args.command == 'graph':
 
         if args.output is None:
@@ -1624,7 +1683,7 @@ def main():
     elif args.command == 'collect':
 
         binaries, meta, pool = resolve_binaries(logger, config)
-        path = collect(config, logger, binaries, meta, pool, args.dry_run, args.dest, args.skip)
+        path = collect(config, logger, binaries, meta, pool, args.dry_run, args.dst, args.skip)
         if args.zip:
             zip_dir(config, logger, path)
 
