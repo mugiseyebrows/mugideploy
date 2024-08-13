@@ -781,14 +781,14 @@ def resolve_binaries(logger, config) -> tuple[list[Binary], ResolveMetaData, Bin
         
         if is_qt5:
             if is_qt_debug:
-                config['plugins'] += ['qwindowsvistastyled', 'qwindowsd']
+                config['plugins'] += ['styles', 'qwindowsd']
             else:
-                config['plugins'] += ['qwindowsvistastyle', 'qwindows']
+                config['plugins'] += ['styles', 'qwindows']
         elif is_qt6:
             if is_qt_debug:
-                config['plugins'] += ['qmodernwindowsstyled', 'qwindowsd']
+                config['plugins'] += ['styles', 'qwindowsd']
             else:
-                config['plugins'] += ['qmodernwindowsstyle', 'qwindows']
+                config['plugins'] += ['styles', 'qwindows']
 
     if is_qt5 or is_qt6:
         if is_qt5:
