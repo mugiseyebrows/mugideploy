@@ -18,6 +18,30 @@ from urllib.request import urlretrieve
 import hashlib
 import sys
 
+def fourints(v):
+    cols = v.split('.')
+    while len(cols) < 4:
+        cols.append('0')
+    return ','.join(cols)
+
+def save_text(path, data):
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(data)
+
+def update_header(header_path, version):
+    lines = load_lines(header_path)
+    for i, line in enumerate(lines):
+        rx = "\\s+".join(['\\s*#\\s*define', '([^ ]*)', '(.*)'])
+        m = re.match(rx, line)
+        if m:
+            n = m.group(1)
+            v = m.group(2)
+            if n == 'APP_VERSION':
+                lines[i] = '#define APP_VERSION "{}"\n'.format(version)
+            elif n == 'APP_VERSION_INT':
+                lines[i] = '#define APP_VERSION_INT {}\n'.format(fourints(version))
+    save_text(header_path, ''.join(lines))
+
 # TODO do not store (optionally) plugins-path
 # TODO update --license
 # TODO collect --zip
@@ -374,13 +398,18 @@ def to_debug_release(files):
     while len(files) > 0:
         name = files.pop(0)
         n, e = os.path.splitext(name)
-        named = n + 'd' + e
+        if n.endswith('4'):
+            named = n[:-1] + 'd4' + e
+        else:
+            named = n + 'd' + e
+        #debug_print(name, named)
         if named in files:
             files.pop(files.index(named))
             debug.append(named)
             release.append(name)
         else:
             release.append(name)
+    debug_print(debug, release)
     return debug, release
 
 class PluginsCollection:
@@ -617,7 +646,7 @@ def update_config(config, args):
 
     set_config_value(config, 'toolchain', args)
 
-    for key in ['msystem', 'src', 'version_header', 'unix_dirs', 'vcruntime', 'msapi', 'system', 'ace']:
+    for key in ['msystem', 'src', 'version_header', 'unix_dirs', 'vcruntime', 'msapi', 'system', 'ace', 'output_dir']:
         set_config_value(config, key, args)
 
     if args.data is not None:
@@ -652,6 +681,9 @@ def update_config(config, args):
             first_bin = config['bin'][0]
             name = os.path.splitext(os.path.basename(first_bin))[0]
         config['app'] = name
+
+    if config.get('output_dir') is None:
+        config['output_dir'] = '.'
     
     if has_any_bin(config):
         first_bin = os.path.realpath(config['bin'][0]).lower()
@@ -890,6 +922,7 @@ class InnoScript(dict):
     def __init__(self):
         super().__init__()
         self['Setup'] = []
+        self['Languages'] = []
         self['Tasks'] = []
         self['Files'] = []
         self['Icons'] = []
@@ -901,7 +934,7 @@ class InnoScript(dict):
         def format_dict(d):
             res = []
             for k,v in d.items():
-                if k in ['Name','Source','DestDir','Filename','StatusMsg','Parameters','Description','GroupDescription']:
+                if k in ['Name','Source','DestDir','Filename','StatusMsg','Parameters','Description','GroupDescription','MessagesFile']:
                     v_ = '"' + v + '"'
                 else:
                     v_ = v
@@ -918,6 +951,13 @@ class InnoScript(dict):
                        line = format_dict(line)
                     f.write(line + "\n")
                 f.write("\n")
+
+
+def relpath(path, start):
+    try:
+        return os.path.relpath(path, start)
+    except ValueError:
+        pass
 
 def inno_script(config, logger, binaries, meta):
 
@@ -944,8 +984,8 @@ def inno_script(config, logger, binaries, meta):
         'UninstallDisplayIcon': os.path.join("{app}", binaries[0].name),
         'Compression': 'lzma2',
         'SolidCompression': 'yes',
-        'OutputDir': '.',
-        'OutputBaseFilename': config["app"] + '-' + config["version"],
+        'OutputDir': config['output_dir'],
+        'OutputBaseFilename': 'setup-' + config["app"] + '-' + config["version"],
         'RestartIfNeededByRun': 'no',
     }
 
@@ -953,6 +993,11 @@ def inno_script(config, logger, binaries, meta):
         vars['ArchitecturesInstallIn64BitMode'] = 'x64'
 
     script['Setup'].append(inno_vars(vars))
+
+    script['Languages'].append({
+        'Name': 'ru',
+        'MessagesFile': 'compiler:Languages\Russian.isl'
+    })
 
     script['Tasks'].append({
         'Name': 'desktopicon',
@@ -966,9 +1011,16 @@ def inno_script(config, logger, binaries, meta):
         else:
             return os.path.join("{app}", dest)
 
+    cwd = os.getcwd()
     for item in binaries:
+        path = relpath(item.path, cwd)
+        if path is not None and not path.startswith('..'):
+            source = path
+            #source = item.path
+        else:
+            source = item.path
         script['Files'].append({
-            'Source': item.path,
+            'Source': source,
             'DestDir': app_dest(item.dest),
             'Flags': 'ignoreversion'
         })
@@ -1517,23 +1569,28 @@ def load_lines(path):
     with open(path, encoding='utf-8') as f:
         return list(f)
 
+def parse_header(header_path):
+    lines = load_lines(header_path)
+    for i, line in enumerate(lines):
+        rx = "\\s+".join(['\\s*#\\s*define', '([^ ]*)', '(.*)'])
+        m = re.match(rx, line)
+        if m:
+            n = m.group(1)
+            v = m.group(2)
+            if n == 'APP_VERSION':
+                version = v.strip().replace('"', '')
+                return version
+
 def parse_header_for_version(config):
     cwd = os.getcwd()
     header_path = os.path.join(cwd, 'version.h')
     
     if os.path.isfile(header_path):
         debug_print('version header found')
-        lines = load_lines(header_path)
-        for i, line in enumerate(lines):
-            rx = "\\s+".join(['\\s*#\\s*define', '([^ ]*)', '(.*)'])
-            m = re.match(rx, line)
-            if m:
-                n = m.group(1)
-                v = m.group(2)
-                if n == 'APP_VERSION':
-                    version = v.strip().replace('"', '')
-                    config['version'] = version
-                    debug_print('APP_VERSION found in header, value', version)
+        version = parse_header(header_path)
+        if version is not None:
+            config['version'] = version
+            debug_print('APP_VERSION found in header, value', version)
     else:
         debug_print('version header does not exist', header_path)
 
@@ -1582,6 +1639,7 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help="Do not copy files (collect and copy command)")
     parser.add_argument('--zip', action='store_true', help='Zip collected data')
     parser.add_argument('--git-version', action='store_true', help='Use git tag as version')
+    parser.add_argument('--output-dir', help='inno setup script output dir')
     #parser.add_argument('--cmake-version', action='store_true', help='Read version from CMakeLists.txt')
 
     # find, graph
