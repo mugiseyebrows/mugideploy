@@ -32,10 +32,10 @@ def debug_print_off(*args):
 
 # set DEBUG_MUGIDEPLOY=1
 
-if 'DEBUG_MUGIDEPLOY' in os.environ and os.environ['DEBUG_MUGIDEPLOY'] == "1":
-    debug_print = debug_print_on
+if os.environ.get('DEBUG_MUGIDEPLOY') == "1":
+    debug_print = lambda *args, **kwargs: print(*args, **kwargs, file=sys.stderr)
 else:
-    debug_print = debug_print_off
+    debug_print = lambda *args: False
 
 def noext_basename(path):
     return os.path.splitext(os.path.basename(path))[0]
