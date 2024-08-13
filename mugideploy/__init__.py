@@ -1005,19 +1005,19 @@ def inno_script(config, logger, binaries, meta):
             
             script['Files'].append(item_)
                 
-        if meta.qt:
-            script['Files'].append('Source: "{}"; DestDir: "{}"'.format(qt_conf_path, app_dest(None)))
+    if meta.qt:
+        script['Files'].append('Source: "{}"; DestDir: "{}"'.format(qt_conf_path, app_dest(None)))
 
-        script['Icons'].append({
-            'Name': os.path.join('{group}', config["app"]),
-            'Filename': os.path.join('{app}', binaries[0].name)
-        })
+    script['Icons'].append({
+        'Name': os.path.join('{group}', config["app"]),
+        'Filename': os.path.join('{app}', binaries[0].name)
+    })
 
-        script['Icons'].append({
-            'Name': os.path.join('{commondesktop}', config["app"]),
-            'Filename': os.path.join('{app}', binaries[0].name),
-            'Tasks': 'desktopicon'
-        })
+    script['Icons'].append({
+        'Name': os.path.join('{commondesktop}', config["app"]),
+        'Filename': os.path.join('{app}', binaries[0].name),
+        'Tasks': 'desktopicon'
+    })
 
     if meta.vcruntime and config['vcruntime'] == 'exe':
 
