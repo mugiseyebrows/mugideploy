@@ -1370,16 +1370,6 @@ def find_cmakelists(config):
             return guess
     #raise ValueError("CMakeLists.txt not found, please use --src")
 
-"""
-def write_version(config, logger: Logger):
-    path = find_version_header(config)
-    with open(path, 'w', encoding='utf-8') as f:
-        version = config['version']
-        f.write("#define VERSION \"{}\"\n".format(version))
-        f.write("#define VERSION_INT {}\n".format(version_int(version)))
-    logger.print_info("version {} writen to {}".format(version, path))
-"""
-
 def find_inno_compiler():
     return existing([
         os.path.join(os.environ['ProgramFiles(x86)'], 'Inno Setup 6', 'compil32.exe'),
