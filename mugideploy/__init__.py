@@ -1513,6 +1513,30 @@ def parse_cmakelists_for_version(config):
                 config['version'] = m.group(1)
                 break
 
+def load_lines(path):
+    with open(path, encoding='utf-8') as f:
+        return list(f)
+
+def parse_header_for_version(config):
+    cwd = os.getcwd()
+    header_path = os.path.join(cwd, 'version.h')
+    
+    if os.path.isfile(header_path):
+        debug_print('version header found')
+        lines = load_lines(header_path)
+        for i, line in enumerate(lines):
+            rx = "\\s+".join(['\\s*#\\s*define', '([^ ]*)', '(.*)'])
+            m = re.match(rx, line)
+            if m:
+                n = m.group(1)
+                v = m.group(2)
+                if n == 'APP_VERSION':
+                    version = v.strip().replace('"', '')
+                    config['version'] = version
+                    debug_print('APP_VERSION found in header, value', version)
+    else:
+        debug_print('version header does not exist', header_path)
+
 def main():
 
     colorama_init()
@@ -1580,6 +1604,7 @@ def main():
     update_config(config, args)
 
     parse_cmakelists_for_version(config)
+    parse_header_for_version(config)
 
     if args.command == 'version':
         args.git_version = True
