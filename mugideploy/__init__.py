@@ -17,6 +17,58 @@ from urllib.parse import quote as urlquote
 from urllib.request import urlretrieve
 import hashlib
 import sys
+import itertools
+import functools
+
+def load_json(path):
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+def save_json(path: str, data):
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+
+def update_changelog(path, version, message):
+    if path is None:
+        path = os.path.join(os.getcwd(), 'changelog.json')
+    data: list[dict] = []
+    if os.path.exists(path):
+        data = load_json(path)
+    data.append({
+        'version': version,
+        'text': message
+    })
+    save_json(path, data)
+
+
+@dataclass
+class SetupFile:
+    name: str
+    version: list[int]
+    version_str: str
+
+def cmp_setup_file(e1: SetupFile, e2: SetupFile):
+    v1 = e1.version
+    v2 = e2.version
+    for a,b in itertools.zip_longest(v1, v2, fillvalue=0):
+        if a > b:
+            return 1
+        elif a < b:
+            return -1
+    return 0
+
+def get_setup_files(base_path: str, appname: str) -> list[tuple[str, list[int], str]]:
+    rx = re.compile('setup[.-]' + appname + '[.-]([0-9.]+)[.]exe')
+    files = []
+    for n in os.listdir(base_path):
+        m = rx.match(n)
+        if m:
+            version = [int(e) for e in m.group(1).split('.')]
+            version_str = m.group(1)
+            files.append(SetupFile(n, version, version_str))
+    files.sort(key=functools.cmp_to_key(cmp_setup_file))
+    return files
+
 
 def fourints(v):
     cols = v.split('.')
@@ -562,7 +614,7 @@ def read_changelog(config):
 def write_changelog(config, changelog):
     write_json(changelog_path(config), changelog)
 
-def update_changelog(config, version, message):
+def update_config_changelog(config, version, message):
     changelog = read_changelog(config)
     changelog[version] = message
     write_changelog(config, changelog)
@@ -912,7 +964,7 @@ def bump_version(config, args, logger):
     config['version'] = ".".join([str(e) for e in version])
 
     if args.changelog is not None:
-        update_changelog(config, config['version'], args.changelog)
+        update_config_changelog(config, config['version'], args.changelog)
 
     write_config(config)
     #run_version_script(config, logger)
