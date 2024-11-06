@@ -196,14 +196,21 @@ class DataItem:
 
     ) = range(1)
 
-    def __init__(self, path, dest = None):
-        self.path = path
+    def __init__(self, path, dest = None, isdir = False):
+        self._path = path
         self._dest = dest
+        self._isdir = isdir
 
-    def innoDest(self, app):
+    def innoSource(self):
+        if self._isdir:
+            return self._path + "\*"
+        return self._path
+
+    def innoDest(self):
         dest = self._dest
-        
         if dest is None:
+            if self._isdir:
+                return os.path.join("{app}", self._path)
             return "{app}"
         else:
             if "%appdata%" in dest.lower():
@@ -1097,12 +1104,14 @@ def inno_script(config, logger, binaries, meta):
                 files = [src]
 
             for item in files:
-                items.append(DataItem(src, dst))
+                isdir = os.path.isdir(src)
+                items.append(DataItem(src, dst, isdir))
 
+        item: DataItem
         for item in items:
             item_ = dict()
-            item_['Source'] = item.path
-            item_['DestDir'] = item.innoDest(config['app'])
+            item_['Source'] = item.innoSource()
+            item_['DestDir'] = item.innoDest()
             flags = item.innoFlags()
             if flags is not None:
                 item_['Flags'] = flags
