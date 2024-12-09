@@ -1887,7 +1887,7 @@ def main():
 
         for i, binary in enumerate(binaries):
             #print(i, binary.name, binary.isplugin)
-            if binary.isplugin or pool.is_system(binary) or pool.is_msapi(binary):
+            if binary.isplugin or pool.is_system(binary) or pool.is_msapi(binary) or pool.is_vcruntime(binary):
                 continue
             file_dst = os.path.join(dst, binary.name)
             if os.path.isfile(file_dst):
