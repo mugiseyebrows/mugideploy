@@ -185,7 +185,7 @@ class JSONEncoder(json.JSONEncoder):
 class Binary:
     name: str
     path: str = None
-    dependencies: list[object] = None
+    dependencies: list[str] = None
     isplugin: bool = False
     dest: str = None
 
@@ -203,7 +203,7 @@ class DataItem:
 
     def innoSource(self):
         if self._isdir:
-            return self._path + "\*"
+            return self._path + "\\*"
         return self._path
 
     def innoDest(self):
@@ -305,7 +305,7 @@ def get_dependencies(path):
     #debug_print('pefile for {}'.format(path))
 
     if not hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
-        print('{} has no DIRECTORY_ENTRY_IMPORT'.format(path))
+        #print('{} has no DIRECTORY_ENTRY_IMPORT'.format(path))
         return []
     else:
         res = [name for name in [item.dll.decode('utf-8') for item in pe.DIRECTORY_ENTRY_IMPORT] if name.lower().endswith('.dll')]
@@ -1055,7 +1055,7 @@ def inno_script(config, logger, binaries, meta):
 
     script['Languages'].append({
         'Name': 'ru',
-        'MessagesFile': 'compiler:Languages\Russian.isl'
+        'MessagesFile': 'compiler:Languages\\Russian.isl'
     })
 
     script['Tasks'].append({
@@ -1169,7 +1169,7 @@ def inno_script(config, logger, binaries, meta):
         script['Code'].append(textwrap.dedent("""\
             function ShouldInstallAce: Boolean;
             begin
-                Result := Not FileExists(ExpandConstant('{commoncf}\microsoft shared\OFFICE14\ACECORE.DLL'))
+                Result := Not FileExists(ExpandConstant('{commoncf}\\microsoft shared\\OFFICE14\\ACECORE.DLL'))
             end;"""))
 
     path = os.path.join(os.getcwd(), 'setup.iss')
@@ -1550,6 +1550,88 @@ class PrettyNames:
         name_ = name.lower()
         return self._names[name_]
 
+
+from treelib import Node, Tree
+import uuid
+
+class Node:
+    def __init__(self, binary):
+        self.binary = binary
+        self.children: list[Node] = []
+        self.uuid = str(uuid.uuid4())
+
+def print_tree(config, pool: BinariesPool, binaries: list[Binary], print_system = False, print_msapi = False, print_vcruntime = False, repeat = False):
+
+    all_binaries = pool.binaries(binaries, True, True, True)
+
+    def find(name):
+        for bin in all_binaries:
+            if bin.name.lower() == name.lower():
+                return bin
+
+    added = set()
+
+    def add_children(node: Node):
+        binary = node.binary
+        for dep in binary.dependencies:
+            bin = find(dep)
+
+            if bin is None:
+                print("{} not found".format(dep), file=sys.stderr)
+                continue
+
+            if not print_msapi:
+                if pool.is_msapi(bin):
+                    continue
+
+            if not print_system:
+                if pool.is_system(bin):
+                    continue
+
+            if not print_vcruntime:
+                if pool.is_vcruntime(bin):
+                    continue
+
+            if not repeat:
+                if bin.name.lower() in added:
+                    continue
+            added.add(bin.name.lower())
+
+            child = Node(bin)
+            node.children.append(child)
+            add_children(child)
+            
+    root = Node(None)
+
+    for path in config['bin']:
+        name = os.path.basename(path)
+        bin = find(name)
+
+        if not repeat:
+            if bin.name.lower() in added:
+                continue
+        added.add(bin.name.lower())
+
+        node = Node(bin)
+        add_children(node)
+        root.children.append(node)
+
+    tree = Tree()
+
+    def build_tree(node: Node):
+        child: Node
+        for child in node.children:
+            tree.create_node(child.binary.name, child.uuid, parent=node.uuid)
+            build_tree(child)
+
+    tree.create_node("root", root.uuid)
+    build_tree(root)
+
+    for child in root.children:
+        subtree = tree.subtree(child.uuid)
+        out = subtree.show(stdout=False)
+        print(out)
+
 def write_graph(config, binaries, meta, pool: BinariesPool, output, show_graph):
 
     names = PrettyNames()
@@ -1651,7 +1733,7 @@ def main():
 
     parser = argparse.ArgumentParser(prog='mugideploy')
 
-    parser.add_argument('command', choices=['update', 'find', 'list', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins', 'clear-cache', 'download', 'version', 'copy-dep'])
+    parser.add_argument('command', choices=['update', 'find', 'list', 'graph', 'collect', 'inno-script', 'inno-compile', 'build', 'bump-major', 'bump-minor', 'bump-fix', 'show-plugins', 'clear-cache', 'download', 'version', 'copy-dep', 'tree'])
     
     parser.add_argument('--bin', nargs='+')
     parser.add_argument('--app')
@@ -1697,6 +1779,9 @@ def main():
     parser.add_argument('-o','--output', help='Path to save dependency tree or graph')
     # graph
     parser.add_argument('--show', action='store_true', help='Show graph in browser')
+
+    # tree
+    parser.add_argument("--no-repeat", action='store_true')
 
     args, extraArgs = parser.parse_known_args()
 
@@ -1778,6 +1863,16 @@ def main():
             if skip_binary(config, pool, binary):
                 continue
             print(binary.path)
+
+    elif args.command == 'tree':
+
+        mutedLogger = MutedLogger()
+        binaries, meta, pool = resolve_binaries(mutedLogger, config)
+        print_system = config.get('system') == 'dll'
+        print_msapi = config.get('msapi') == 'dll'
+        print_vcruntime = config.get('vcruntime') == 'dll'
+        repeat = not args.no_repeat
+        print_tree(config, pool, binaries, print_system, print_msapi, print_vcruntime, repeat)
 
     elif args.command == 'copy-dep':
 
