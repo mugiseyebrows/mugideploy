@@ -570,10 +570,7 @@ except ImportError as e:
 """
 
 def makedirs(path):
-    try:
-        os.makedirs(path)
-    except OSError:
-        pass
+    os.makedirs(path, exist_ok=True)
 
 def executable_with_ext(exe):
     if os.path.splitext(exe)[1] == '':
@@ -597,7 +594,7 @@ def read_json(path):
 
 def write_qt_conf(path):
     base = os.path.dirname(path)
-    makedirs(base)
+    os.makedirs(base, exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         f.write('[Paths]\nplugins = plugins')
 
@@ -825,7 +822,7 @@ class ResolveMetaData:
     qt_gui: bool
     vcruntime: bool
 
-def resolve_binaries(logger, config) -> tuple[list[Binary], ResolveMetaData, BinariesPool]:
+def resolve_binaries(logger: Logger, config) -> tuple[list[Binary], ResolveMetaData, BinariesPool]:
 
     if 'bin' not in config:
         logger.print_error('Specify binaries please')
@@ -946,8 +943,42 @@ def resolve_binaries(logger, config) -> tuple[list[Binary], ResolveMetaData, Bin
 
     resolver = Resolver(search_paths, ['.dll', '.exe'], config.get('msys_root'))
 
+    debug_print("is_gtk", is_gtk)
+
     if is_gtk:
-        helpers = [resolver.resolve(name, logger) for name in ['gspawn-win64-helper.exe', 'gspawn-win64-helper-console.exe']]
+        helpers = [resolver.resolve(name, logger) for name in ['gspawn-win64-helper.exe', 'gspawn-win64-helper-console.exe', 'rsvg-convert.exe', 'gdbus.exe']]
+
+        def find_msys_lib(name):
+
+            msys_root = config.get('msys_root')
+            msystem: str = config.get('msystem')
+
+            if msys_root and msystem:
+                p = os.path.join(msys_root, msystem.lower(), 'bin')
+                if os.path.isdir(p):
+                    ns = [n for n in os.listdir(p) if n.startswith(name) and n.endswith('.dll')]
+                    #debug_print("librsvg", ns)
+                    if len(ns) > 0:
+                        if len(ns) > 1:
+                            print("multiple candidates for {} {}".format(name, ns))
+                        n = ns[0]
+                        return Binary(os.path.basename(n), os.path.join(p, n))
+                        
+        librsvg = find_msys_lib('librsvg')
+        vulkan = find_msys_lib('vulkan')
+
+        if librsvg:
+            helpers.append(librsvg)
+        else:
+            logger.print_error("librsvg not found")
+
+        if vulkan:
+            helpers.append(vulkan)
+        else:
+            logger.print_error("vulkan not found")
+
+        debug_print("config['app']", config['app'])
+
         config['bin'] += helpers
 
     pool = BinariesPool(binaries, resolver, config, logger)
@@ -1024,7 +1055,6 @@ def inno_script(config, logger, binaries, meta):
     qt_conf_path = os.path.join('tmp', "qt.conf")
     
     if meta.qt:
-        makedirs(os.path.dirname(qt_conf_path))
         write_qt_conf(qt_conf_path)
 
     script = InnoScript()
@@ -1213,6 +1243,10 @@ def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, g
         if verbose:
             logger.print_copied(src, dst)
 
+    def makedirs(path):
+        if not dry_run:
+            os.makedirs(path, exist_ok=True)
+
     def copy_tree(src, dst, verbose = True):
         for root, dirs, files in os.walk(src):
             rel_path = os.path.relpath(root, src)
@@ -1230,11 +1264,12 @@ def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, g
             makedirs(dst_)
             for f in files:
                 if cond(f):
+                    #debug_print("copy_tree_if", os.path.join(root, f))
                     shutil_copy(os.path.join(root, f), os.path.join(dst_, f), False)
         logger.print_copied(src, dst)
 
-    if not dry_run:
-        makedirs(base_bin)
+    
+    makedirs(base_bin)
 
     logger.print_info("Collecting in {} {}".format(base, "(dry_run)" if dry_run else ""))
 
@@ -1265,8 +1300,7 @@ def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, g
         else:
             dest = os.path.join(base_bin, binary.dest, os.path.basename(binary.path))
 
-        if not dry_run:
-            makedirs(os.path.dirname(dest))
+        makedirs(os.path.dirname(dest))
 
         shutil_copy(binary.path, dest)
 
@@ -1297,6 +1331,8 @@ def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, g
         dest = os.path.join(base, os.path.basename(vcredist))
         shutil_copy(vcredist, dest)
 
+    #debug_print("meta.gtk", meta.gtk)
+
     if meta.gtk:
         msys_root = config['msys_root']
 
@@ -1305,22 +1341,30 @@ def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, g
         msystem_base = os.path.join(msys_root, msystem)
 
         extra = [
-            os.path.join(msystem_base, 'share', 'icons', 'Adwaita'),
-            os.path.join(msystem_base, 'lib', 'gdk-pixbuf-2.0', '2.10.0'),
-            os.path.join(msystem_base, 'share', 'glib-2.0')
+            os.path.join(msystem_base, 'share/icons/Adwaita'),
+            os.path.join(msystem_base, 'lib/gdk-pixbuf-2.0'),
+            os.path.join(msystem_base, 'share/glib-2.0')
         ]
 
         for src in extra:
             dst = os.path.join(base, os.path.relpath(src, msystem_base))
             copy_tree(src, dst)
 
-        src = os.path.join(msystem_base, 'share', 'locale')
+        src = os.path.join(msystem_base, 'share/locale')
         dst = os.path.join(base, os.path.relpath(src, msystem_base))
 
-        name = os.path.splitext(os.path.basename(config['bin'][0]))[0]
+        #name = os.path.splitext(os.path.basename(config['bin'][0]))[0]
+        name = config['app']
 
         # locales
         copy_tree_if(src, dst, lambda f: os.path.splitext(f)[0] == name)
+
+        src = os.path.join(msystem_base, 'share/icons/hicolor')
+        dst = os.path.join(base, os.path.relpath(src, msystem_base))
+
+        # icon
+        copy_tree_if(src, dst, lambda f: name in f)
+
 
     logger.flush_copied()
 
