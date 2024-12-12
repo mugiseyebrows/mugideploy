@@ -1124,39 +1124,6 @@ def collect(config: Config, logger: Logger, binaries, meta: ResolveMetaData, poo
 
     #debug_print("meta.gtk", meta.gtk)
 
-    if meta.gtk:
-        msys_root = config.msys_root
-
-        msystem = config.msystem.lower()
-
-        msystem_base = os.path.join(msys_root, msystem)
-
-        extra = [
-            os.path.join(msystem_base, 'share/icons/Adwaita'),
-            os.path.join(msystem_base, 'lib/gdk-pixbuf-2.0'),
-            os.path.join(msystem_base, 'share/glib-2.0')
-        ]
-
-        for src in extra:
-            dst = os.path.join(base, os.path.relpath(src, msystem_base))
-            copy_tree(src, dst)
-
-        src = os.path.join(msystem_base, 'share/locale')
-        dst = os.path.join(base, os.path.relpath(src, msystem_base))
-
-        #name = os.path.splitext(os.path.basename(config.bin[0]))[0]
-        name = config.name
-
-        # locales
-        copy_tree_if(src, dst, lambda f: os.path.splitext(f)[0] == name)
-
-        src = os.path.join(msystem_base, 'share/icons/hicolor')
-        dst = os.path.join(base, os.path.relpath(src, msystem_base))
-
-        # icon
-        copy_tree_if(src, dst, lambda f: name in f)
-
-
     logger.flush_copied()
 
     return base
