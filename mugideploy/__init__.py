@@ -75,6 +75,7 @@ class Config:
     dst: str = None
     no_repeat: bool = False
     output: str = None
+    zip: bool = False
     
 @dataclass
 class SetupFile:
@@ -128,10 +129,6 @@ def update_header(header_path, version):
             elif n == 'APP_VERSION_INT':
                 lines[i] = '#define APP_VERSION_INT {}\n'.format(fourints(version))
     save_text(header_path, ''.join(lines))
-
-# TODO do not store (optionally) plugins-path
-# TODO update --license
-# TODO collect --zip
 
 MSYSTEMS = ['MINGW32', 'MINGW64', 'UCRT64', 'CLANG64', 'MSYS2']
 
@@ -673,7 +670,7 @@ def args_to_config(args) -> Config:
 
     config = Config()
 
-    for n in ['name', 'version', 'msystem', 'output', 'output_dir', 'src', 'dst', 'msys_root', 'dry_run', 'no_repeat']:
+    for n in ['name', 'version', 'msystem', 'output', 'output_dir', 'src', 'dst', 'msys_root', 'dry_run', 'no_repeat', 'zip']:
         setattr(config, n, getattr(args, n))
 
     if config.msys_root is None:
@@ -872,7 +869,7 @@ def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], Reso
         else:
             logger.print_error("vulkan not found")
 
-        debug_print("config.app", config.app)
+        debug_print("config.name", config.name)
 
         config.bin += helpers
 
@@ -940,15 +937,15 @@ def inno_script(config: Config, logger, binaries, meta, pool):
         return "\n".join(res)
 
     vars = {
-        'AppName': config.app,
+        'AppName': config.name,
         'AppVersion': config.version,
-        'DefaultDirName': os.path.join("{commonpf}", config.app),
-        'DefaultGroupName': config.app,
+        'DefaultDirName': os.path.join("{commonpf}", config.name),
+        'DefaultGroupName': config.name,
         'UninstallDisplayIcon': os.path.join("{app}", binaries[0].name),
         'Compression': 'lzma2',
         'SolidCompression': 'yes',
         'OutputDir': config.output_dir if config.output_dir else '.',
-        'OutputBaseFilename': 'setup-' + config.app + '-' + config.version,
+        'OutputBaseFilename': 'setup-' + config.name + '-' + config.version,
         'RestartIfNeededByRun': 'no',
     }
 
@@ -1026,12 +1023,12 @@ def inno_script(config: Config, logger, binaries, meta, pool):
         script['Files'].append('Source: "{}"; DestDir: "{}"'.format(qt_conf_path, app_dest(None)))
 
     script['Icons'].append({
-        'Name': os.path.join('{group}', config.app),
+        'Name': os.path.join('{group}', config.name),
         'Filename': os.path.join('{app}', binaries[0].name)
     })
 
     script['Icons'].append({
-        'Name': os.path.join('{commondesktop}', config.app),
+        'Name': os.path.join('{commondesktop}', config.name),
         'Filename': os.path.join('{app}', binaries[0].name),
         'Tasks': 'desktopicon'
     })
@@ -1065,7 +1062,7 @@ end;""")
 
     script.write(config.output)
 
-def collect(config: Config, logger: Logger, binaries, meta, pool):
+def collect(config: Config, logger: Logger, binaries, meta: ResolveMetaData, pool):
 
     dry_run = config.dry_run
     dest = config.dst
@@ -1077,7 +1074,7 @@ def collect(config: Config, logger: Logger, binaries, meta, pool):
 
     base = dest.replace('%name%', config.name).replace('%version%',config.version).replace('%arch%',arch)
 
-    #base = os.path.join(os.getcwd(), "{}-{}-{}".format(config.app, config.version, arch))
+    #base = os.path.join(os.getcwd(), "{}-{}-{}".format(config.name, config.version, arch))
 
     if meta.gtk or config.unix_dirs:
         base_bin = os.path.join(base, 'bin')
@@ -1159,13 +1156,9 @@ def collect(config: Config, logger: Logger, binaries, meta, pool):
         dest = os.path.join(base, os.path.basename(path))
         shutil_copy(path, dest)
 
-    if meta.vcruntime and config.vcruntime == 'exe':
-        if meta.amd64:
-            vcredist = config.vcredist64
-        else:
-            vcredist = config.vcredist32
-        dest = os.path.join(base, os.path.basename(vcredist))
-        shutil_copy(vcredist, dest)
+    if meta.vcruntime and config.vcruntime:
+        dest = os.path.join(base, os.path.basename(config.vcredist))
+        shutil_copy(config.vcredist, dest)
 
     #debug_print("meta.gtk", meta.gtk)
 
@@ -1190,7 +1183,7 @@ def collect(config: Config, logger: Logger, binaries, meta, pool):
         dst = os.path.join(base, os.path.relpath(src, msystem_base))
 
         #name = os.path.splitext(os.path.basename(config.bin[0]))[0]
-        name = config.app
+        name = config.name
 
         # locales
         copy_tree_if(src, dst, lambda f: os.path.splitext(f)[0] == name)
@@ -1379,7 +1372,7 @@ def print_tree(config: Config, binaries: list[Binary], meta, pool):
             subtree = tree.subtree(child.uuid)
             print(subtree.show(stdout=False), file=f)
 
-def write_graph(config, binaries, meta, pool: BinariesPool):
+def write_graph(config, logger, binaries, meta, pool: BinariesPool):
 
     names = PrettyNames()
 
@@ -1548,12 +1541,12 @@ def main():
 
     elif args.command == 'graph':
 
-        write_graph(config, binaries, meta, pool)
+        write_graph(config, logger, binaries, meta, pool)
 
     elif args.command == 'collect':
 
         path = collect(config, logger, binaries, meta, pool)
-        if args.zip:
+        if config.zip:
             zip_dir(config, logger, path)
 
     elif args.command == 'inno-script':
