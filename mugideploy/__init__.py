@@ -242,12 +242,19 @@ def is_child_path(path, base):
     return os.path.realpath(path).startswith(os.path.realpath(base))
 
 def unique_case_insensitive(paths):
-    return list({v.lower(): v for v in paths}.values())
+    used = set()
+    res = []
+    for path in paths:
+        if path.lower() not in used:
+            res.append(path)
+            used.add(path.lower())
+    return res
 
 class Resolver:
     def __init__(self, paths, exts, msys_root):
         binaries = defaultdict(list)
-        for path in unique_case_insensitive(paths):
+        paths_ = unique_case_insensitive(paths)
+        for path in paths_:
             try:
                 items = os.listdir(path)
                 for item in items:
@@ -289,6 +296,9 @@ class Resolver:
 
             logger.multiple_candidates(name, items)
             #print("multiple choises for {}:\n{}\n".format(name, "\n".join(items)))
+        if len(items) < 1:
+            raise ValueError("cannot resolve {}".format(name))
+
         return items[0]
 
 def makedirs(path):
@@ -356,12 +366,20 @@ class BinariesPool:
     def __init__(self, paths, resolver: Resolver, config, logger):
 
         vcruntime = False
-        pool: list[Binary] = [Binary(os.path.basename(path), path) if isinstance(path, str) else path for path in paths]
-        i = 0
+        pool: list[Binary] = []
+
+        for path in paths:
+            if isinstance(path, str):
+                if not os.path.isfile(path):
+                    path = resolver.resolve(path, logger)
+                pool.append(Binary(os.path.basename(path), path))
+            else:
+                pool.append(path)
 
         skip_list = set(['msvcp140.dll','msvcr90.dll'])
         
         reader = PEReader()
+        i = 0
         while i < len(pool):
             item = pool[i]
             if item.path is None:
@@ -744,6 +762,28 @@ class ResolveMetaData:
     qt_gui: bool
     vcruntime: bool
 
+def get_search_paths(config, binaries: list[Any]):
+    extra_paths = []
+    def dirname(path):
+        res = os.path.dirname(path)
+        if res == '':
+            return '.'
+        return res
+    for binary in binaries:
+        if isinstance(binary, str):
+            extra_paths.append(dirname(binary))
+        elif isinstance(binary, Binary):
+            if binary.isplugin:
+                continue
+            extra_paths.append(dirname(binary.path))
+    search_paths = extra_paths + os.environ['PATH'].split(";")
+    if config.msystem:
+        extra_paths = [
+            os.path.join(config.msys_root, config.msystem.lower(), 'bin')
+        ]
+        search_paths += extra_paths
+    return search_paths
+
 def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], ResolveMetaData, BinariesPool]:
 
     if len(config.bin) < 1:
@@ -751,7 +791,14 @@ def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], Reso
 
     logger.print_info("Resolving imports\n")
 
-    dependencies = [e.lower() for e in get_dependencies(config.bin[0])]
+    first_bin = config.bin[0]
+
+    if not os.path.isfile(first_bin):
+        search_paths = get_search_paths(config, config.bin)
+        resolver = Resolver(search_paths, ['.dll', '.exe'], config.msys_root)
+        first_bin = resolver.resolve(first_bin, logger)
+
+    dependencies = [e.lower() for e in get_dependencies(first_bin)]
 
     #debug_print('dependencies', dependencies)
 
@@ -760,7 +807,7 @@ def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], Reso
         if re.match('libgtk.*\\.dll', dep):
             is_gtk = True
 
-    is_amd64 = is_amd64_bin(config.bin[0])
+    is_amd64 = is_amd64_bin(first_bin)
 
     is_qt4 = len({'qtcore4.dll', 'qtcored4.dll'}.intersection(dependencies)) > 0
 
@@ -805,33 +852,7 @@ def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], Reso
         if len(config.plugins) > 0:
             raise ValueError("len(config.plugins) > 0 and not is_qt")
 
-    extra_paths = []
-
-    def dirname(path):
-        res = os.path.dirname(path)
-        if res == '':
-            return '.'
-        return res
-
-    for binary in binaries:
-        if isinstance(binary, str):
-            extra_paths.append(dirname(binary))
-        elif isinstance(binary, Binary):
-            if binary.isplugin:
-                continue
-            extra_paths.append(dirname(binary.path))
-
-    search_paths = extra_paths + os.environ['PATH'].split(";")
-
-    #search_paths.append('C:\\Windows\\System32\\downlevel')
-
-    #debug_print(config)
-
-    if config.msystem:
-        extra_paths = [
-            os.path.join(config.msys_root, config.msystem.lower(), 'bin')
-        ]
-        search_paths += extra_paths
+    search_paths = get_search_paths(config, binaries)
 
     resolver = Resolver(search_paths, ['.dll', '.exe'], config.msys_root)
 
