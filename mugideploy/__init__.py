@@ -835,44 +835,6 @@ def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], Reso
 
     resolver = Resolver(search_paths, ['.dll', '.exe'], config.msys_root)
 
-    debug_print("is_gtk", is_gtk)
-
-    if is_gtk:
-        helpers = [resolver.resolve(name, logger) for name in ['gspawn-win64-helper.exe', 'gspawn-win64-helper-console.exe', 'rsvg-convert.exe', 'gdbus.exe']]
-
-        def find_msys_lib(name):
-
-            msys_root = config.msys_root
-            msystem: str = config.msystem
-
-            if msys_root and msystem:
-                p = os.path.join(msys_root, msystem.lower(), 'bin')
-                if os.path.isdir(p):
-                    ns = [n for n in os.listdir(p) if n.startswith(name) and n.endswith('.dll')]
-                    #debug_print("librsvg", ns)
-                    if len(ns) > 0:
-                        if len(ns) > 1:
-                            print("multiple candidates for {} {}".format(name, ns))
-                        n = ns[0]
-                        return Binary(os.path.basename(n), os.path.join(p, n))
-                        
-        librsvg = find_msys_lib('librsvg')
-        vulkan = find_msys_lib('vulkan')
-
-        if librsvg:
-            helpers.append(librsvg)
-        else:
-            logger.print_error("librsvg not found")
-
-        if vulkan:
-            helpers.append(vulkan)
-        else:
-            logger.print_error("vulkan not found")
-
-        debug_print("config.name", config.name)
-
-        config.bin += helpers
-
     pool = BinariesPool(binaries, resolver, config, logger)
 
     meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt6=is_qt6, qt_gui=is_qt_gui, qt_debug=is_qt_debug, vcruntime=pool.vcruntime(), gtk=is_gtk)
