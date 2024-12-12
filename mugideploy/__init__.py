@@ -10,7 +10,7 @@ import glob
 import subprocess
 from colorama import Fore, Back, Style, init as colorama_init
 from importlib.machinery import SourceFileLoader
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import defaultdict
 import zipfile
 from urllib.parse import quote as urlquote
@@ -20,6 +20,7 @@ import sys
 import itertools
 import functools
 import contextlib
+from typing import Any
 
 def load_json(path):
     with open(path, encoding='utf-8') as f:
@@ -55,6 +56,26 @@ def open_(path, *args, **kwargs):
         else:
             f.close()
 
+@dataclass
+class Config:
+    name: str = None
+    version: str = None
+    bin: list[Any] = field(default_factory=list)
+    plugins: list[Any] = field(default_factory=list)
+    plugins_path: list[Any] = field(default_factory=list)
+    data: list[Any] = field(default_factory=list)
+    src: str = None
+    version_header: str = None
+    vcredist: str = None
+    unix_dirs: bool = False
+    vcruntime: bool = False
+    system: bool = False
+    msapi: bool = False
+    dry_run: bool = False
+    dst: str = None
+    no_repeat: bool = False
+    output: str = None
+    
 @dataclass
 class SetupFile:
     name: str
@@ -137,10 +158,10 @@ class Logger():
         self._dst = []
 
     def print_info(self, msg):
-        print(Fore.YELLOW + Style.BRIGHT + msg + Fore.RESET + Style.NORMAL)
+        print(Fore.YELLOW + Style.BRIGHT + msg + Fore.RESET + Style.NORMAL, file=sys.stderr)
 
     def print_error(self, msg):
-        print(Fore.RED + Style.BRIGHT + msg + Fore.RESET)
+        print(Fore.RED + Style.BRIGHT + msg + Fore.RESET, file=sys.stderr)
 
     def print_copied(self, src, dst):
         if src is not None:
@@ -149,47 +170,25 @@ class Logger():
             self._dst.append(dst)
 
     def flush_copied(self, src_label = "Sources", dst_label = "Collected", abspath = False):
-        print("\n" + src_label)
+        print("\n" + src_label, file=sys.stderr)
         for item in self._src:
-            print(Fore.GREEN + Style.BRIGHT + item + Fore.RESET + Style.NORMAL)
-        print("\n" + dst_label)
+            print(Fore.GREEN + Style.BRIGHT + item + Fore.RESET + Style.NORMAL, file=sys.stderr)
+        print("\n" + dst_label, file=sys.stderr)
         cwd = os.getcwd()
         if abspath:
             getpath = lambda item: item
         else:
             getpath = lambda item: os.path.relpath(item, cwd)
         for item in self._dst:
-            print(Fore.GREEN + Style.BRIGHT + getpath(item) + Fore.RESET + Style.NORMAL)
+            print(Fore.GREEN + Style.BRIGHT + getpath(item) + Fore.RESET + Style.NORMAL, file=sys.stderr)
         self._src = []
         self._dst = []
 
     def print_writen(self, path):
-        print(Fore.YELLOW + Style.BRIGHT + path + Fore.RESET + Style.NORMAL + " writen")
+        print(Fore.YELLOW + Style.BRIGHT + path + Fore.RESET + Style.NORMAL + " writen", file=sys.stderr)
 
     def multiple_candidates(self, name, items):
-        print(Fore.MAGENTA + "Multiple candidates for " + name + "\n" + Fore.MAGENTA + Style.BRIGHT + "\n".join(items) + Fore.RESET + Style.NORMAL + "\n")
-
-
-class MutedLogger():
-
-    def print_info(self, msg):
-        pass
-
-    def print_error(self, msg):
-        pass
-
-    def print_copied(self, src, dst):
-        pass
-
-    def flush_copied(self):
-        pass
-
-    def print_writen(self, path):
-        pass
-
-    def multiple_candidates(self, name, items):
-        pass
-
+        print(Fore.MAGENTA + "Multiple candidates for " + name + "\n" + Fore.MAGENTA + Style.BRIGHT + "\n".join(items) + Fore.RESET + Style.NORMAL + "\n", file=sys.stderr)
 
 class JSONEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -589,7 +588,7 @@ def config_path():
 
 def changelog_path(config):
     if 'src' in config:
-        return os.path.join(config['src'], 'changelog.json')
+        return os.path.join(config.src, 'changelog.json')
     return os.path.join(os.getcwd(), 'changelog.json')
 
 def read_changelog(config):
@@ -609,12 +608,6 @@ def update_config_changelog(config, version, message):
     changelog[version] = message
     write_changelog(config, changelog)
 
-def guess_app_and_version(config):
-    if 'version' not in config:
-        config['version'] = "1.0"
-    if 'app' not in config and 'bin' in config:
-        config['app'] = os.path.splitext(os.path.basename(config['bin'][0]))[0]
-
 def makedirs(path):
     os.makedirs(path, exist_ok=True)
 
@@ -623,13 +616,18 @@ def cdup(path, n):
         path = os.path.dirname(path)
     return path
 
-def guess_plugins_path():
+def split_lines(text):
+    return [l.strip() for l in text.split('\n')]
+
+def filter_empty(lines):
+    return [l for l in lines if l != '']
+
+def query_plugins_path():
     qmake = shutil.which("qmake")
     if qmake is None:
-        return None
-    path = os.path.join(cdup(qmake, 2), "plugins")
-    if os.path.exists(path):
-        return path
+        return []
+    lines = filter_empty(split_lines(subprocess.check_output([qmake, "-query", "QT_INSTALL_PLUGINS"]).decode('utf-8')))
+    return lines
 
 def append_list(config, key, values, expand_globs = False):
 
@@ -659,84 +657,56 @@ def append_list(config, key, values, expand_globs = False):
         if value not in config[key]:
             config[key].append(value)
 
-def set_config_value(config, key, args, default = None):
+def paths_and_globs(items):
+    res = []
+    if items is None:
+        return res
+    for item in items:
+        if glob.has_magic(item):
+            for matched in glob.glob(item):
+                res.append(matched)
+        else:
+            res.append(item)
+    return res
 
-    value = getattr(args, key)
+def args_to_config(args) -> Config:
 
-    if value is not None:
-        config[key] = value
+    config = Config()
 
-    if config.get(key) is None and default is not None:
-        config[key] = default
+    for n in ['name', 'version', 'msystem', 'output', 'output_dir', 'src', 'dst', 'msys_root', 'dry_run', 'no_repeat']:
+        setattr(config, n, getattr(args, n))
 
-def set_default_value(config, key, value):
-    if config.get(key) is None:
-        config[key] = value
+    if config.msys_root is None:
+        if os.path.isdir("C:\\msys64"):
+            config.msys_root = "C:\\msys64"
 
-def update_config(config, args):
+    for n in ['data', 'bin', 'plugins', 'plugins_path']:
+        items = paths_and_globs(getattr(args, n))
+        setattr(config, n, items)
 
-    #debug_print('config', config)
+    if config.name is None:
+        if len(config.bin) > 0:
+            config.name = os.path.splitext(os.path.basename(config.bin[0]))[0]
 
-    set_config_value(config, 'app', args)
+    for path in query_plugins_path():
+        config.plugins_path.append(path)
 
-    set_config_value(config, 'version', args, '0.0.1')
+    debug_print('plugins-path', config.plugins_path)
 
-    set_config_value(config, 'toolchain', args)
-
-    for key in ['msystem', 'src', 'version_header', 'unix_dirs', 'vcruntime', 'msapi', 'system', 'ace', 'output_dir', 'output', 'show']:
-        set_config_value(config, key, args)
-
-    if args.data is not None:
-        items = []
-        for item in args.data:
-            if glob.has_magic(item):
-                for f in glob.glob(item):
-                    items.append(f)
-            else:
-                items.append(item)
-
-        append_list(config, 'data', items)
-
-    append_list(config, 'bin', getattr(args, 'bin'), expand_globs = True)
-
-    append_list(config, 'plugins', getattr(args, 'plugins'))
-
-    append_list(config, 'plugins-path', args.plugins_path)
-
-    if 'plugins-path' not in config:
-        config['plugins-path'] = []
-
-    append_list(config, 'plugins-path', guess_plugins_path())
-
-    debug_print('plugins-path', config['plugins-path'])
-
-    if config.get('app') is None or config['app'] == 'untitled':
-        name = 'untitled'
-        if has_any_bin(config):
-            first_bin = config['bin'][0]
-            name = os.path.splitext(os.path.basename(first_bin))[0]
-        config['app'] = name
-
-    if config.get('output_dir') is None:
-        config['output_dir'] = '.'
-    
-    if has_any_bin(config):
-        first_bin = os.path.realpath(config['bin'][0]).lower()
-
-        if config.get('msys_root') is None:
+    if len(config.bin) > 0:
+        first_bin = os.path.realpath(config.bin[0]).lower()
+        if config.msys_root is None:
             if first_bin.startswith('c:\\msys64'):
-                config['msys_root'] = 'C:\\msys64'
-
-        if config.get('msystem') is None and config.get('msys_root') is not None:
+                config.msys_root = 'C:\\msys64'
+        if config.msystem is None and config.msys_root is not None:
             for msystem in MSYSTEMS:
-                path = os.path.join(config['msys_root'], msystem).lower()
+                path = os.path.join(config.msys_root, msystem).lower()
                 #debug_print('path',path)
                 if first_bin.startswith(path):
-                    config['msystem'] = msystem
+                    config.msystem = msystem
                     break
-        debug_print('first_bin', first_bin)
-        debug_print('msys_root', config.get('msys_root'))
-        debug_print('msystem', config.get('msystem'))
+
+    return config
 
 def existing(paths):
     for path in paths:
@@ -757,23 +727,11 @@ def cwd_contains_project_file():
 def has_any_bin(config):
     if 'bin' not in config:
         return False
-    if len(config['bin']) == 0:
+    if len(config.bin) == 0:
         return False
     return True
 
-def is_qt_app(config):
-
-    if not has_any_bin(config):
-        return cwd_contains_project_file()
-
-    first_bin = config['bin'][0]
-    if not os.path.exists(first_bin):
-        return cwd_contains_project_file()
-
-    dependencies = [e.lower() for e in get_dependencies(first_bin)]
-    return len({'qt6core.dll','qt6cored.dll','qt5core.dll','qt5cored.dll','qtcore4.dll','qtcored4.dll'}.intersection(dependencies)) > 0
-
-def test_amd64(path):
+def is_amd64_bin(path):
     pe = pefile.PE(path, fast_load=True)
     return pe.FILE_HEADER.Machine == pefile.MACHINE_TYPE['IMAGE_FILE_MACHINE_AMD64']
 
@@ -789,17 +747,14 @@ class ResolveMetaData:
     qt_gui: bool
     vcruntime: bool
 
-def resolve_binaries(logger: Logger, config) -> tuple[list[Binary], ResolveMetaData, BinariesPool]:
+def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], ResolveMetaData, BinariesPool]:
 
-    if not config.get('bin'):
-        logger.print_error('Specify binaries please')
-        if isinstance(logger, MutedLogger):
-            raise ValueError("Specify binaries please")
-        return
+    if len(config.bin) < 1:
+        raise ValueError("Specify binaries please")
 
     logger.print_info("Resolving imports\n")
 
-    dependencies = [e.lower() for e in get_dependencies(config['bin'][0])]
+    dependencies = [e.lower() for e in get_dependencies(config.bin[0])]
 
     #debug_print('dependencies', dependencies)
 
@@ -808,7 +763,7 @@ def resolve_binaries(logger: Logger, config) -> tuple[list[Binary], ResolveMetaD
         if re.match('libgtk.*\\.dll', dep):
             is_gtk = True
 
-    is_amd64 = test_amd64(config['bin'][0])
+    is_amd64 = is_amd64_bin(config.bin[0])
 
     is_qt4 = len({'qtcore4.dll', 'qtcored4.dll'}.intersection(dependencies)) > 0
 
@@ -830,45 +785,18 @@ def resolve_binaries(logger: Logger, config) -> tuple[list[Binary], ResolveMetaD
         'qt6cored.dll',
     }.intersection(dependencies)) > 0
 
-    if is_qt_gui and is_qt:
-        if 'plugins' not in config:
-            config['plugins'] = []
-        
-        if is_qt5:
+    if is_qt_gui:
+        if is_qt5 or is_qt6:
             if is_qt_debug:
-                config['plugins'] += ['styles', 'qwindowsd']
+                config.plugins += ['styles', 'qwindowsd']
             else:
-                config['plugins'] += ['styles', 'qwindows']
-        elif is_qt6:
-            if is_qt_debug:
-                config['plugins'] += ['styles', 'qwindowsd']
-            else:
-                config['plugins'] += ['styles', 'qwindows']
+                config.plugins += ['styles', 'qwindows']
 
-    if is_qt5 or is_qt6:
-        if is_qt5:
-            qmake = shutil.which('qmake')
-        elif is_qt6:
-            qmake = shutil.which('qmake')
-            if qmake is None:
-                qmake = shutil.which('qmake6')
-        if qmake:
-            path = subprocess.check_output([qmake, '-query', 'QT_INSTALL_PLUGINS']).decode('utf-8').strip()
-            if 'plugins-path' not in config:
-                config['plugins-path'] = []
-            config['plugins-path'].append(path)
-
-    binaries: list[str] = config['bin']
-
-    # print("plugins-path", config['plugins-path'])
+    binaries: list[str] = config.bin
 
     if is_qt:
-        # Check if --bin is a plugin
-        if 'plugins' in config:
-            plugins = config['plugins']
-        else:
-            plugins = []
-        collection = PluginsCollection(config['plugins-path'], is_qt_debug)
+        plugins = config.plugins
+        collection = PluginsCollection(config.plugins_path, is_qt_debug)
         not_plugins = []
         for binary in binaries:
             if collection.is_plugin(binary):
@@ -877,7 +805,8 @@ def resolve_binaries(logger: Logger, config) -> tuple[list[Binary], ResolveMetaD
                 not_plugins.append(binary)
         binaries = not_plugins + collection.binaries(plugins)
     else:
-        pass
+        if len(config.plugins) > 0:
+            raise ValueError("len(config.plugins) > 0 and not is_qt")
 
     extra_paths = []
 
@@ -901,14 +830,13 @@ def resolve_binaries(logger: Logger, config) -> tuple[list[Binary], ResolveMetaD
 
     #debug_print(config)
 
-    if config.get('msystem') is not None:
-        
+    if config.msystem:
         extra_paths = [
-            os.path.join(config['msys_root'], config['msystem'].lower(), 'bin')
+            os.path.join(config.msys_root, config.msystem.lower(), 'bin')
         ]
         search_paths += extra_paths
 
-    resolver = Resolver(search_paths, ['.dll', '.exe'], config.get('msys_root'))
+    resolver = Resolver(search_paths, ['.dll', '.exe'], config.msys_root)
 
     debug_print("is_gtk", is_gtk)
 
@@ -917,8 +845,8 @@ def resolve_binaries(logger: Logger, config) -> tuple[list[Binary], ResolveMetaD
 
         def find_msys_lib(name):
 
-            msys_root = config.get('msys_root')
-            msystem: str = config.get('msystem')
+            msys_root = config.msys_root
+            msystem: str = config.msystem
 
             if msys_root and msystem:
                 p = os.path.join(msys_root, msystem.lower(), 'bin')
@@ -944,20 +872,15 @@ def resolve_binaries(logger: Logger, config) -> tuple[list[Binary], ResolveMetaD
         else:
             logger.print_error("vulkan not found")
 
-        debug_print("config['app']", config['app'])
+        debug_print("config.app", config.app)
 
-        config['bin'] += helpers
+        config.bin += helpers
 
     pool = BinariesPool(binaries, resolver, config, logger)
 
     meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt6=is_qt6, qt_gui=is_qt_gui, qt_debug=is_qt_debug, vcruntime=pool.vcruntime(), gtk=is_gtk)
-    #debug_print(meta)
-
-    system = config['system'] == 'dll'
-    msapi = config['msapi'] == 'dll'
-    vcruntime = config['vcruntime'] == 'dll'
-
-    return pool.binaries(binaries, system, msapi, vcruntime), meta, pool
+    
+    return pool.binaries(binaries, config.system, config.msapi, config.vcruntime), meta, pool
 
 class InnoScript(dict):
 
@@ -1000,7 +923,7 @@ def relpath(path, start):
     except ValueError:
         pass
 
-def inno_script(config, logger, binaries, meta, pool: BinariesPool, output):
+def inno_script(config: Config, logger, binaries, meta, pool):
 
     #qt_conf_path = os.path.join(os.getenv('APPDATA'), "mugideploy", "qt.conf")
     qt_conf_path = os.path.join('tmp', "qt.conf")
@@ -1017,15 +940,15 @@ def inno_script(config, logger, binaries, meta, pool: BinariesPool, output):
         return "\n".join(res)
 
     vars = {
-        'AppName': config["app"],
-        'AppVersion': config["version"],
-        'DefaultDirName': os.path.join("{commonpf}", config["app"]),
-        'DefaultGroupName': config["app"],
+        'AppName': config.app,
+        'AppVersion': config.version,
+        'DefaultDirName': os.path.join("{commonpf}", config.app),
+        'DefaultGroupName': config.app,
         'UninstallDisplayIcon': os.path.join("{app}", binaries[0].name),
         'Compression': 'lzma2',
         'SolidCompression': 'yes',
-        'OutputDir': config['output_dir'],
-        'OutputBaseFilename': 'setup-' + config["app"] + '-' + config["version"],
+        'OutputDir': config.output_dir if config.output_dir else '.',
+        'OutputBaseFilename': 'setup-' + config.app + '-' + config.version,
         'RestartIfNeededByRun': 'no',
     }
 
@@ -1069,7 +992,7 @@ def inno_script(config, logger, binaries, meta, pool: BinariesPool, output):
 
         items = []
 
-        for item in config['data']:
+        for item in config.data:
             dst = None
             if isinstance(item, str):
                 src = item
@@ -1103,45 +1026,33 @@ def inno_script(config, logger, binaries, meta, pool: BinariesPool, output):
         script['Files'].append('Source: "{}"; DestDir: "{}"'.format(qt_conf_path, app_dest(None)))
 
     script['Icons'].append({
-        'Name': os.path.join('{group}', config["app"]),
+        'Name': os.path.join('{group}', config.app),
         'Filename': os.path.join('{app}', binaries[0].name)
     })
 
     script['Icons'].append({
-        'Name': os.path.join('{commondesktop}', config["app"]),
+        'Name': os.path.join('{commondesktop}', config.app),
         'Filename': os.path.join('{app}', binaries[0].name),
         'Tasks': 'desktopicon'
     })
 
-    if meta.vcruntime and config['vcruntime'] == 'exe':
-
-        if meta.amd64:
-            vcredist = config['vcredist64']
-        else:
-            vcredist = config['vcredist32']
-
-        script['Files'].append({'Source':vcredist, 'DestDir': '{tmp}'})
-
+    if meta.vcruntime and config.vcredist:
+        script['Files'].append({'Source': config.vcredist, 'DestDir': '{tmp}'})
         script['Run'].append({
-            'Filename': os.path.join("{tmp}", os.path.basename(vcredist)),
+            'Filename': os.path.join("{tmp}", os.path.basename(config.vcredist)),
             'StatusMsg': "Installing Microsoft Visual C++ Redistributable",
             'Parameters': "/quiet /norestart",
         })
 
-    if config['ace'] != 'none':
+    if config.ace:
 
         # https://stackoverflow.com/questions/35231455/inno-setup-section-run-with-condition
         # https://stackoverflow.com/questions/12951327/inno-setup-check-if-file-exist-in-destination-or-else-if-doesnt-abort-the-ins
 
-        if meta.amd64:
-            ace_path = config['ace64']
-        else:
-            ace_path = config['ace32']
-        
-        script['Files'].append({'Source':ace_path, 'DestDir': '{tmp}'})
+        script['Files'].append({'Source':config.ace, 'DestDir': '{tmp}'})
 
         script['Run'].append({
-            'Filename': os.path.join("{tmp}", os.path.basename(ace_path)),
+            'Filename': os.path.join("{tmp}", os.path.basename(config.ace)),
             'StatusMsg': "Installing Access Database Engine",
             'Parameters': "/quiet /norestart",
             'Check': 'ShouldInstallAce'
@@ -1152,23 +1063,23 @@ begin
     Result := Not FileExists(ExpandConstant('{commoncf}\\microsoft shared\\OFFICE14\\ACECORE.DLL'))
 end;""")
 
-    script.write(config.get('output'))
+    script.write(config.output)
 
-def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, git_version = False):
+def collect(config: Config, logger: Logger, binaries, meta, pool):
 
-    if skip is None:
-        skip = []
+    dry_run = config.dry_run
+    dest = config.dst
 
     arch = "win64" if meta.amd64 else "win32"
 
     if dest is None:
-        dest = '%app%-%version%-%arch%'
+        dest = '%name%-%version%-%arch%'
 
-    base = dest.replace('%app%', config["app"]).replace('%version%',config["version"]).replace('%arch%',arch)
+    base = dest.replace('%name%', config.name).replace('%version%',config.version).replace('%arch%',arch)
 
-    #base = os.path.join(os.getcwd(), "{}-{}-{}".format(config["app"], config["version"], arch))
+    #base = os.path.join(os.getcwd(), "{}-{}-{}".format(config.app, config.version, arch))
 
-    if meta.gtk or config['unix_dirs']:
+    if meta.gtk or config.unix_dirs:
         base_bin = os.path.join(base, 'bin')
     else:
         base_bin = base
@@ -1177,8 +1088,6 @@ def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, g
         #print("shutil_copy", src, dst)
         if not dry_run:
             #debug_print(src, dst)
-            if os.path.basename(src) in skip:
-                return
             if os.path.realpath(src) == os.path.realpath(dst):
                 debug_print("{} == {}".format(src, dst))
                 return
@@ -1224,10 +1133,10 @@ def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, g
 
     qt_conf_path = os.path.join(base_bin, "qt.conf")
 
-    if meta.qt and "qt.conf" not in skip:
-        logger.print_copied(None, qt_conf_path)
+    if meta.qt:
         if not dry_run:
             write_qt_conf(qt_conf_path)
+        logger.print_copied(None, qt_conf_path)
             
     #print(binaries)
 
@@ -1235,13 +1144,6 @@ def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, g
 
         if binary.path is None:
             #print("skip", b.name)
-            continue
-
-        """
-        if  b.name.lower().startswith('vcruntime') and config['vcruntime'] != 'dll':
-            continue
-        """
-        if skip_binary(config, pool, binary):
             continue
 
         if binary.dest is None:
@@ -1253,39 +1155,24 @@ def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, g
 
         shutil_copy(binary.path, dest)
 
-    # changelog
-    if 'src' in config:
-        path = os.path.join(config['src'], 'changelog.json')
-    else:
-        path = os.path.join(os.getcwd(), 'changelog.json')
-    if os.path.isfile(path):
-        dest = os.path.join(base, 'changelog.json')
+    for path in config.data:
+        dest = os.path.join(base, os.path.basename(path))
         shutil_copy(path, dest)
-        
-    if 'data' in config:
-        for path in config['data']:
-            if glob.has_magic(path):
-                files = glob.glob(path)
-            else:
-                files = [path]
-            for item in files:
-                dest = os.path.join(base, os.path.basename(item))
-                shutil_copy(item, dest)
 
-    if meta.vcruntime and config['vcruntime'] == 'exe':
+    if meta.vcruntime and config.vcruntime == 'exe':
         if meta.amd64:
-            vcredist = config['vcredist64']
+            vcredist = config.vcredist64
         else:
-            vcredist = config['vcredist32']
+            vcredist = config.vcredist32
         dest = os.path.join(base, os.path.basename(vcredist))
         shutil_copy(vcredist, dest)
 
     #debug_print("meta.gtk", meta.gtk)
 
     if meta.gtk:
-        msys_root = config['msys_root']
+        msys_root = config.msys_root
 
-        msystem = config['msystem'].lower()
+        msystem = config.msystem.lower()
 
         msystem_base = os.path.join(msys_root, msystem)
 
@@ -1302,8 +1189,8 @@ def collect(config, logger: Logger, binaries, meta, pool, dry_run, dest, skip, g
         src = os.path.join(msystem_base, 'share/locale')
         dst = os.path.join(base, os.path.relpath(src, msystem_base))
 
-        #name = os.path.splitext(os.path.basename(config['bin'][0]))[0]
-        name = config['app']
+        #name = os.path.splitext(os.path.basename(config.bin[0]))[0]
+        name = config.app
 
         # locales
         copy_tree_if(src, dst, lambda f: os.path.splitext(f)[0] == name)
@@ -1327,14 +1214,14 @@ def version_int(version):
         return ",".join(cols[:4])
     return version_int("0.0.0.1")
 
-def find_version_header(config):
-    path = config.get('version_header')
+def find_version_header(config: Config):
+    path = config.version_header
     if path is not None:
         return path
-    if 'src' in config:
+    if config.src:
         guesses = [
-            os.path.join(config['src'], 'version.h'),
-            os.path.join(config['src'], 'src', 'version.h')
+            os.path.join(config.src, 'version.h'),
+            os.path.join(config.src, 'src', 'version.h')
         ]
     else:
         cwd = os.path.realpath('.')
@@ -1351,9 +1238,9 @@ def find_version_header(config):
     raise ValueError("version.h not found, please use --version-header or --src")
 
 def find_cmakelists(config):
-    if 'src' in config:
+    if config.src:
         guesses = [
-            os.path.join(config['src'], 'CMakeLists.txt'),
+            os.path.join(config.src, 'CMakeLists.txt'),
         ]
     else:
         cwd = os.path.realpath('.')
@@ -1420,7 +1307,21 @@ class Node:
         self.children: list[Node] = []
         self.uuid = str(uuid.uuid4())
 
-def print_tree(config, pool: BinariesPool, binaries: list[Binary], repeat = False):
+def copy_dep(config: Config, logger: Logger, binaries: list[Binary], meta, pool):
+    dst = config.dst
+    for binary in binaries:
+        file_dst = os.path.join(dst, binary.name)
+        if os.path.isfile(file_dst):
+            pass
+        else:
+            if config.dry_run:
+                pass
+            else:
+                shutil.copy(binary.path, file_dst)
+            logger.print_copied(binary.path, file_dst)
+    logger.flush_copied("Source", "Destination", os.path.isabs(dst))
+
+def print_tree(config: Config, binaries: list[Binary], meta, pool):
 
     def find(name):
         for bin in binaries:
@@ -1438,7 +1339,7 @@ def print_tree(config, pool: BinariesPool, binaries: list[Binary], repeat = Fals
                 #print("{} not found".format(dep), file=sys.stderr)
                 continue
 
-            if not repeat:
+            if config.no_repeat:
                 if bin.name.lower() in added:
                     continue
             added.add(bin.name.lower())
@@ -1449,11 +1350,11 @@ def print_tree(config, pool: BinariesPool, binaries: list[Binary], repeat = Fals
             
     root = Node(None)
 
-    for path in config['bin']:
+    for path in config.bin:
         name = os.path.basename(path)
         bin = find(name)
 
-        if not repeat:
+        if config.no_repeat:
             if bin.name.lower() in added:
                 continue
         added.add(bin.name.lower())
@@ -1473,7 +1374,7 @@ def print_tree(config, pool: BinariesPool, binaries: list[Binary], repeat = Fals
     tree.create_node("root", root.uuid)
     build_tree(root)
 
-    with open_(config.get('output'), "w", encoding='utf-8') as f:
+    with open_(config.output, "w", encoding='utf-8') as f:
         for child in root.children:
             subtree = tree.subtree(child.uuid)
             print(subtree.show(stdout=False), file=f)
@@ -1482,14 +1383,8 @@ def write_graph(config, binaries, meta, pool: BinariesPool):
 
     names = PrettyNames()
 
-    #print(config['system'])
-
     deps = set()
     for binary in binaries:
-
-        if skip_binary(config, pool, binary):
-            continue
-
         if binary.path is None:
             print("binary {} has no path".format(binary.name))
             continue
@@ -1502,35 +1397,18 @@ def write_graph(config, binaries, meta, pool: BinariesPool):
         names[name1] = name
         names[name2] = name
 
-        #print("names", name1, name2, names.names(name))
-
         for dep_binary in binary.dependencies:
-            if skip_binary(config, pool, dep_binary):
-                continue
             deps.add((binary.name.lower(), dep_binary.lower()))
             names[dep_binary] = dep_binary
     
     digraph = "digraph G {\nnode [shape=rect]\n" + "\n".join(['    "{}" -> "{}"'.format(names[name], names[dependancy]) for name, dependancy in deps]) + "\n}\n"
 
-    if config.get('show'):
-        url = 'https://dreampuf.github.io/GraphvizOnline/#' + urlquote(digraph)
-        os.startfile(url)
-
-    with open_(config.get('output'), 'w', encoding='utf-8') as f:
+    with open_(config.output, 'w', encoding='utf-8') as f:
         f.write(digraph)
 
 def clear_cache():
     path = os.path.join(os.getenv('APPDATA'), "mugideploy", "pe-cache.json")
     os.remove(path)
-
-def skip_binary(config, pool, binary):
-    if config['system'] != 'dll' and pool.is_system(binary):
-        return True
-    if config['vcruntime'] != 'dll' and pool.is_vcruntime(binary):
-        return True
-    if config['msapi'] != 'dll' and pool.is_msapi(binary):
-        return True
-    return False
 
 def parse_cmakelists_for_version(config):
     path = find_cmakelists(config)
@@ -1541,7 +1419,7 @@ def parse_cmakelists_for_version(config):
         for line in f:
             m = rx.search(line)
             if m:
-                config['version'] = m.group(1)
+                config.version = m.group(1)
                 break
 
 def load_lines(path):
@@ -1568,7 +1446,7 @@ def parse_header_for_version(config):
         debug_print('version header found')
         version = parse_header(header_path)
         if version is not None:
-            config['version'] = version
+            config.version = version
             debug_print('APP_VERSION found in header, value', version)
     else:
         debug_print('version header does not exist', header_path)
@@ -1579,31 +1457,25 @@ def main():
 
     parser = argparse.ArgumentParser(prog='mugideploy')
 
-    parser.add_argument('command', choices=['json', 'list', 'graph', 'tree', 'collect', 'inno-script', 'clear-cache', 'copy-dep'])
+    parser.add_argument('command', choices=['json', 'list', 'graph', 'tree', 'collect', 'inno-script', 'copy-dep', 'clear-cache'])
+    
+    parser.add_argument('--name')
+    parser.add_argument('--version')
     
     parser.add_argument('--bin', nargs='+')
-    parser.add_argument('--app')
-    parser.add_argument('--version')
     parser.add_argument('--data', nargs='+')
-    parser.add_argument('--plugins', nargs='+')
-    parser.add_argument('--plugins-path', nargs='+')
-    parser.add_argument('--toolchain', help="One of: mingw32, vs, cmake (build command)")
-    #parser.add_argument('--changelog')
-    parser.add_argument('--skip', nargs='+', help="Names to skip on collect")
+    parser.add_argument('--plugins', '--plugin', nargs='+')
+    parser.add_argument('--plugins-path', '--plugin-path', nargs='+')
+
     parser.add_argument('--dst', help="destination path or path template (collect) or destination dir (copy command)")
 
-    parser.add_argument('--inno-compiler', help='Path to Inno Setup Compiler compil32.exe (including name)')
-    parser.add_argument('--vcredist32', help='Path to Microsoft Visual C++ Redistributable x86')
-    parser.add_argument('--vcredist64', help='Path to Microsoft Visual C++ Redistributable x64')
+    parser.add_argument('--vcredist', help='Path to Microsoft Visual C++ Redistributable')
+    parser.add_argument('--ace', help='Path to Access Database Engine')
     
-    parser.add_argument('--ace32', help='Path to Access Database Engine')
-    parser.add_argument('--ace64', help='Path to Access Database Engine')
-
-    parser.add_argument('--system', choices=['dll', 'none'])
-    parser.add_argument('--vcruntime', choices=['dll', 'exe', 'none'])
-    parser.add_argument('--msapi', choices=['dll', 'none'])
-    parser.add_argument('--ace', choices=['exe', 'none'])
-
+    parser.add_argument('--system', action='store_true')
+    parser.add_argument('--vcruntime', action='store_true')
+    parser.add_argument('--msapi', action='store_true')
+    
     # https://en.wikipedia.org/wiki/Access_Database_Engine
     # ace14 https://download.microsoft.com/download/3/5/C/35C84C36-661A-44E6-9324-8786B8DBE231/accessdatabaseengine_X64.exe
 
@@ -1611,22 +1483,23 @@ def main():
     parser.add_argument('--msystem', choices=MSYSTEMS, help='msystem')
     parser.add_argument('--unix-dirs', action='store_true', help='bin var etc dirs')
 
-    parser.add_argument('--version-header', help='Path to version.h (including name)')
     parser.add_argument('--src', help='Path to sources')
+    parser.add_argument('--version-header', help='Path to version header')
 
     parser.add_argument('--dry-run', action='store_true', help="Do not copy files (collect and copy command)")
     parser.add_argument('--zip', action='store_true', help='Zip collected data')
-    parser.add_argument('--git-version', action='store_true', help='Use git tag as version')
     parser.add_argument('--output-dir', help='inno setup script output dir')
 
-    # find, graph
+    # find, graph, list, inno-script
     parser.add_argument('-o','--output', help='Path to save dependency tree or graph')
-    # graph
-    parser.add_argument('--show', action='store_true', help='Show graph in browser')
     # tree
     parser.add_argument("--no-repeat", action='store_true')
 
     args, extraArgs = parser.parse_known_args()
+
+    if args.command == 'clear-cache':
+        clear_cache()
+        return
 
     logger = Logger()
 
@@ -1637,96 +1510,55 @@ def main():
         else:
             logger.print_info("unexpected argument {}".format(arg))
 
-    config = {}
-    update_config(config, args)
+    config: Config = args_to_config(args)
 
-    parse_cmakelists_for_version(config)
-    parse_header_for_version(config)
-
-    if args.git_version:
-
-        git = shutil.which('git')
-        git_def = 'C:\\Program Files\\Git\\cmd\\git.exe'
-        if git is None and os.path.exists(git_def):
-            git = git_def
-        
-        if git is None:
-            raise ValueError("git not found")
-
-        tags = subprocess.check_output([git,'tag','--points-at','HEAD']).decode('utf-8').split("\n")[0].rstrip()
-        if tags == '':
-            rev = subprocess.check_output([git, 'rev-parse','--short','HEAD']).decode('utf-8').rstrip()
-            version = rev
-        else:
-            version = tags
-        config['version'] = version
-
-    set_default_value(config, 'system', 'none')
-    set_default_value(config, 'vcruntime', 'none')
-    set_default_value(config, 'msapi', 'none')
-    set_default_value(config, 'ace', 'none')
+    if args.command == 'copy-dep':
+        if args.dst is None:
+            raise ValueError("specify --dst")
     
+    if config.version is None:
+        parse_cmakelists_for_version(config)
+
+    if config.version is None:
+        parse_header_for_version(config)
+
+    if config.version is None:
+        config.version = '0.0.1'
+
+    binaries, meta, pool = resolve_binaries(config, logger)
+
     if args.command == 'json':
 
-        binaries, meta, pool = resolve_binaries(logger, config)
-        with open_(config.get('output'), 'w', encoding='utf-8') as f:
+        with open_(config.output, 'w', encoding='utf-8') as f:
             json.dump(binaries, f, ensure_ascii=False, indent=1, cls=JSONEncoder)
 
     elif args.command == 'list':
 
-        mutedLogger = MutedLogger()
-        binaries, meta, pool = resolve_binaries(mutedLogger, config)
-        with open_(config.get('output'), 'w', encoding='utf-8') as f:
+        with open_(config.output, 'w', encoding='utf-8') as f:
             for binary in binaries:
                 print(binary.path, file=f)
 
     elif args.command == 'tree':
 
-        mutedLogger = MutedLogger()
-        binaries, meta, pool = resolve_binaries(mutedLogger, config)
-        repeat = not args.no_repeat
-        print_tree(config, pool, binaries, repeat)
+        print_tree(config, binaries, meta, pool)
 
     elif args.command == 'copy-dep':
 
-        dst = args.dst
-        if dst is None:
-            raise ValueError("specify --dst")
-        if not isinstance(config.get('bin'), list):
-            raise ValueError("specify binaries")
-        
-        binaries, meta, pool = resolve_binaries(logger, config)
-
-        for i, binary in enumerate(binaries):
-            if binary.isplugin or pool.is_system(binary) or pool.is_msapi(binary) or pool.is_vcruntime(binary):
-                continue
-            file_dst = os.path.join(dst, binary.name)
-            if os.path.isfile(file_dst):
-                pass
-            else:
-                if args.dry_run:
-                    pass
-                else:
-                    shutil.copy(binary.path, file_dst)
-                logger.print_copied(binary.path, file_dst)
-        logger.flush_copied("Source", "Destination", os.path.isabs(dst))
+        copy_dep(config, logger, binaries, meta, pool)
 
     elif args.command == 'graph':
 
-        binaries, meta, pool = resolve_binaries(logger, config)
         write_graph(config, binaries, meta, pool)
 
     elif args.command == 'collect':
 
-        binaries, meta, pool = resolve_binaries(logger, config)
-        path = collect(config, logger, binaries, meta, pool, args.dry_run, args.dst, args.skip)
+        path = collect(config, logger, binaries, meta, pool)
         if args.zip:
             zip_dir(config, logger, path)
 
     elif args.command == 'inno-script':
 
-        binaries, meta, pool = resolve_binaries(logger, config)
-        inno_script(config, logger, binaries, meta, pool, args.output)
+        inno_script(config, logger, binaries, meta, pool)
         
     elif args.command == 'clear-cache':
 
