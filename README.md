@@ -75,7 +75,6 @@ options:
   --system                                        Include system dlls
   --vcruntime                                     Include vcruntime dlls
   --msapi                                         Include msapi dlls
-  --dry-run                                       Do not copy files
   --output-dir OUTPUT_DIR                         Inno setup script output dir
   -o OUTPUT, --output OUTPUT                      Path to save file
 ```
@@ -110,7 +109,6 @@ options:
   --system                                        Include system dlls
   --vcruntime                                     Include vcruntime dlls
   --msapi                                         Include msapi dlls
-  --dry-run                                       Do not copy files
   -o OUTPUT, --output OUTPUT                      Path to save file
   --no-repeat                                     Print each dll once (tree)
 ```

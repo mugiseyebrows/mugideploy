@@ -32,7 +32,7 @@ with open('out.txt', 'w', encoding='utf-8') as f:
                 filters.extend(fs)
 
         if command not in ['collect', 'copy-dep']:
-            filters.append('--dst')
+            filters.extend(['--dst', '--dry-run'])
         if command in ['copy-dep', 'collect']:
             filters.append('--output')
 
