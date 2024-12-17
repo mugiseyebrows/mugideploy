@@ -1,50 +1,116 @@
 # mugideploy
 
-mugideploy is C++ deploy utility. 
+mugideploy is C++ deploy utility similar to ldd. It reads info about dynamically linked libraries stored in PE file headers and can:
 
-Bashwise speaking it can be expressed as (pseudocode):
+1) copy all necessary binaries into `name-version-arch` directory (create distribution)
 
-```bash
-mkdir dist
-cp $target dist
-for dep in `ldd $target`; do 
-    cp $dep dist
-done
+2) copy linked libraries into specified directory
+
+3) create inno setup script to build exe installer
+
+4) print this info in various forms
+
+## Create distribution
+
+```shell
+mugideploy collect --version 0.0.1 --bin Release\imgzip.exe --plugins imageformats
 ```
 
-# Usage by example
+creates `imgzip-0.0.1-win64` directory and copies `Release\imgzip.exe` and dependencies there
 
-```cmd
-mugideploy collect --bin path\to\myapp.exe
+```
+options:
+  --name NAME                                     App name
+  --version VERSION                               App version
+  --bin BIN [BIN ...]                             Binaries (dlls, exes)
+  --data DATA [DATA ...]                          Path to data dirs and files
+  --plugins PLUGINS [PLUGINS ...]                 Plugin names
+  --plugins-path PLUGINS_PATH [PLUGINS_PATH ...]  Path to plugins
+  --dst DST                                       Destination path or path template
+  --vcredist VCREDIST                             Path to Microsoft Visual C++ Redistributable
+  --ace ACE                                       Path to Access Database Engine
+  --system                                        Include system dlls
+  --vcruntime                                     Include vcruntime dlls
+  --msapi                                         Include msapi dlls
+  --unix-dirs                                     bin var etc dirs
+  --src SRC                                       Path to sources
+  --version-header VERSION_HEADER                 Path to version header
+  --dry-run                                       Do not copy files
+  --zip                                           Zip collected
 ```
 
-Creates directory `myapp-0.0.1` and stores `myapp.exe` and all its dependent dlls there (make sure that dependencies directories in %PATH% environment variable). If it's qt app, adds `myapp-0.0.1\qt.conf` and necessary plugins.
+## Copy dependencies
 
-```cmd
-mugideploy collect --bin path\to\myapp.exe --plugins qsqlmysql
+```shell
+mugideploy copy-dep --bin C:\qt\6.8.1\mingw_64\bin\qmake.exe --dst C:\qt\6.8.1\mingw_64\bin
 ```
 
-Also pulls `qsqlmysql.dll` (and it's dependencies) and stores it in `myapp-0.0.1\plugins`
+copies dlls into dst directory
 
-To specify name and version use `--app` and `--version`
-
-```cmd
-mugideploy collect --app app --version 1.0.0 --bin path\to\myapp.exe
+```
+options:
+  --bin BIN [BIN ...]                             Binaries (dlls, exes)
+  --plugins PLUGINS [PLUGINS ...]                 Plugin names
+  --plugins-path PLUGINS_PATH [PLUGINS_PATH ...]  Path to plugins
+  --dst DST                                       Destination path or path template
+  --system                                        Include system dlls
+  --vcruntime                                     Include vcruntime dlls
+  --msapi                                         Include msapi dlls
+  --dry-run                                       Do not copy files
 ```
 
-To store data in `mugideploy.json` and use it later, run `mugideploy init` and `mugideploy update`.
+## Create inno setup script
 
-```cmd
-mugideploy init --bin path\to\myapp.exe --plugins qsqlmysql
-mugideploy update --version 1.1.0 --changelog "fixed random bug"
-make
-mugideploy collect
+```shell
+mugideploy inno-script --bin Release\imgzip.exe --plugins imageformats --data changelog.json -o setup.iss
 ```
 
-To create innosetup script and compile it into `setup.exe` distribution run
+creates `setup.iss`
 
-```cmd
-mugideploy inno-script --bin path\to\myapp.exe
-mugideploy inno-compile
+```
+options:
+  --bin BIN [BIN ...]                             Binaries (dlls, exes)
+  --plugins PLUGINS [PLUGINS ...]                 Plugin names
+  --plugins-path PLUGINS_PATH [PLUGINS_PATH ...]  Path to plugins
+  --system                                        Include system dlls
+  --vcruntime                                     Include vcruntime dlls
+  --msapi                                         Include msapi dlls
+  --dry-run                                       Do not copy files
+  --output-dir OUTPUT_DIR                         Inno setup script output dir
+  -o OUTPUT, --output OUTPUT                      Path to save file
 ```
 
+## Print info
+
+```shell
+mugideploy list --bin Release\imgzip.exe --plugins imageformats 2> NUL
+```
+prints linked libraries as a list
+
+```shell
+mugideploy json --bin Release\imgzip.exe --plugins imageformats -o binaries.json
+```
+prints linked libraries as a json
+
+```shell
+mugideploy tree --no-repeat --bin Release\imgzip.exe --plugins imageformats 2> NUL
+```
+prints linked libraries as a tree
+
+```shell
+mugideploy graph --bin Release\imgzip.exe --plugins imageformats -o graph.dot
+```
+prints linked libraries as a graph
+
+```
+options:
+  --bin BIN [BIN ...]                             Binaries (dlls, exes)
+  --plugins PLUGINS [PLUGINS ...]                 Plugin names
+  --plugins-path PLUGINS_PATH [PLUGINS_PATH ...]  Path to plugins
+  --system                                        Include system dlls
+  --vcruntime                                     Include vcruntime dlls
+  --msapi                                         Include msapi dlls
+  --dry-run                                       Do not copy files
+  -o OUTPUT, --output OUTPUT                      Path to save file
+  --no-repeat                                     Print each dll once (tree)
+```

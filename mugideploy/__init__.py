@@ -75,6 +75,7 @@ class Config:
     dst: str = None
     no_repeat: bool = False
     output: str = None
+    ace: str = None
     zip: bool = False
     
 @dataclass
@@ -130,7 +131,7 @@ def update_header(header_path, version):
                 lines[i] = '#define APP_VERSION_INT {}\n'.format(fourints(version))
     save_text(header_path, ''.join(lines))
 
-MSYSTEMS = ['MINGW32', 'MINGW64', 'UCRT64', 'CLANG64', 'MSYS2']
+#MSYSTEMS = ['MINGW32', 'MINGW64', 'UCRT64', 'CLANG64', 'MSYS2']
 
 def debug_print_on(*args):
     print(*args)
@@ -251,7 +252,7 @@ def unique_case_insensitive(paths):
     return res
 
 class Resolver:
-    def __init__(self, paths, exts, msys_root):
+    def __init__(self, paths, exts):
         binaries = defaultdict(list)
         paths_ = unique_case_insensitive(paths)
         for path in paths_:
@@ -269,7 +270,7 @@ class Resolver:
         for name, items in binaries.items():
             binaries[name] = unique_case_insensitive(items)
         self._binaries = binaries
-        self._msys_root = msys_root
+        #self._msys_root = msys_root
     
     def resolve(self, name, logger):
         name_ = name.lower()
@@ -280,6 +281,7 @@ class Resolver:
                 raise ValueError("{} cannot be found".format(name))
         items = self._binaries[name_]
         if len(items) > 1:
+            """
             msys_root = self._msys_root
             if msys_root is not None:
                 
@@ -293,7 +295,7 @@ class Resolver:
                 else:
                     #debug_print('{} not found in {}'.format(name_, msys_root))
                     pass
-
+            """
             logger.multiple_candidates(name, items)
             #print("multiple choises for {}:\n{}\n".format(name, "\n".join(items)))
         if len(items) < 1:
@@ -688,7 +690,7 @@ def args_to_config(args) -> Config:
 
     config = Config()
 
-    for n in ['name', 'version', 'msystem', 'output', 'output_dir', 'src', 'dst', 'msys_root', 'dry_run', 'no_repeat', 'zip']:
+    for n in ['name', 'version', 'output', 'output_dir', 'src', 'dst', 'dry_run', 'ace', 'no_repeat', 'zip', 'unix_dirs']:
         setattr(config, n, getattr(args, n))
 
     if config.msys_root is None:
@@ -710,9 +712,12 @@ def args_to_config(args) -> Config:
 
     if len(config.bin) > 0:
         first_bin = os.path.realpath(config.bin[0]).lower()
+        """
         if config.msys_root is None:
             if first_bin.startswith('c:\\msys64'):
                 config.msys_root = 'C:\\msys64'
+        """
+        """
         if config.msystem is None and config.msys_root is not None:
             for msystem in MSYSTEMS:
                 path = os.path.join(config.msys_root, msystem).lower()
@@ -720,6 +725,7 @@ def args_to_config(args) -> Config:
                 if first_bin.startswith(path):
                     config.msystem = msystem
                     break
+        """
 
     return config
 
@@ -777,11 +783,13 @@ def get_search_paths(config, binaries: list[Any]):
                 continue
             extra_paths.append(dirname(binary.path))
     search_paths = extra_paths + os.environ['PATH'].split(";")
+    """
     if config.msystem:
         extra_paths = [
             os.path.join(config.msys_root, config.msystem.lower(), 'bin')
         ]
         search_paths += extra_paths
+    """
     return search_paths
 
 def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], ResolveMetaData, BinariesPool]:
@@ -795,7 +803,7 @@ def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], Reso
 
     if not os.path.isfile(first_bin):
         search_paths = get_search_paths(config, config.bin)
-        resolver = Resolver(search_paths, ['.dll', '.exe'], config.msys_root)
+        resolver = Resolver(search_paths, ['.dll', '.exe'])
         first_bin = resolver.resolve(first_bin, logger)
 
     dependencies = [e.lower() for e in get_dependencies(first_bin)]
@@ -854,7 +862,7 @@ def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], Reso
 
     search_paths = get_search_paths(config, binaries)
 
-    resolver = Resolver(search_paths, ['.dll', '.exe'], config.msys_root)
+    resolver = Resolver(search_paths, ['.dll', '.exe'])
 
     pool = BinariesPool(binaries, resolver, config, logger)
 
@@ -968,7 +976,7 @@ def inno_script(config: Config, logger, binaries, meta, pool):
             'Flags': 'ignoreversion'
         })
 
-    if 'data' in config:
+    if len(config.data) > 0:
 
         items = []
 
@@ -1394,49 +1402,53 @@ def parse_header_for_version(config):
     else:
         debug_print('version header does not exist', header_path)
 
+class HelpFormatter(argparse.HelpFormatter):
+    def __init__(self, prog, indent_increment = 2, max_help_position = 24, width = None):
+        super().__init__(prog, indent_increment, max_help_position = 50, width = 120)
+
 def main():
 
     colorama_init()
 
-    parser = argparse.ArgumentParser(prog='mugideploy')
+    parser = argparse.ArgumentParser(prog='mugideploy', formatter_class=HelpFormatter)
 
     parser.add_argument('command', choices=['json', 'list', 'graph', 'tree', 'collect', 'inno-script', 'copy-dep', 'clear-cache'])
     
-    parser.add_argument('--name')
-    parser.add_argument('--version')
+    parser.add_argument('--name', help='App name')
+    parser.add_argument('--version', help='App version')
     
-    parser.add_argument('--bin', nargs='+')
-    parser.add_argument('--data', nargs='+')
-    parser.add_argument('--plugins', '--plugin', nargs='+')
-    parser.add_argument('--plugins-path', '--plugin-path', nargs='+')
+    parser.add_argument('--bin', nargs='+', help='Binaries (dlls, exes)')
+    parser.add_argument('--data', nargs='+', help='Path to data dirs and files')
+    parser.add_argument('--plugins', nargs='+', help='Plugin names')
+    parser.add_argument('--plugins-path', nargs='+', help='Path to plugins')
 
-    parser.add_argument('--dst', help="destination path or path template (collect) or destination dir (copy command)")
+    parser.add_argument('--dst', help="Destination path or path template")
 
     parser.add_argument('--vcredist', help='Path to Microsoft Visual C++ Redistributable')
     parser.add_argument('--ace', help='Path to Access Database Engine')
     
-    parser.add_argument('--system', action='store_true')
-    parser.add_argument('--vcruntime', action='store_true')
-    parser.add_argument('--msapi', action='store_true')
+    parser.add_argument('--system', action='store_true', help='Include system dlls')
+    parser.add_argument('--vcruntime', action='store_true', help='Include vcruntime dlls')
+    parser.add_argument('--msapi', action='store_true', help='Include msapi dlls')
     
     # https://en.wikipedia.org/wiki/Access_Database_Engine
     # ace14 https://download.microsoft.com/download/3/5/C/35C84C36-661A-44E6-9324-8786B8DBE231/accessdatabaseengine_X64.exe
 
-    parser.add_argument('--msys-root', help='Msys root')
-    parser.add_argument('--msystem', choices=MSYSTEMS, help='msystem')
+    #parser.add_argument('--msys-root', help='Msys root')
+    #parser.add_argument('--msystem', choices=MSYSTEMS, help='Msystem')
     parser.add_argument('--unix-dirs', action='store_true', help='bin var etc dirs')
 
     parser.add_argument('--src', help='Path to sources')
     parser.add_argument('--version-header', help='Path to version header')
 
-    parser.add_argument('--dry-run', action='store_true', help="Do not copy files (collect and copy command)")
-    parser.add_argument('--zip', action='store_true', help='Zip collected data')
-    parser.add_argument('--output-dir', help='inno setup script output dir')
+    parser.add_argument('--dry-run', action='store_true', help="Do not copy files")
+    parser.add_argument('--zip', action='store_true', help='Zip collected')
+    parser.add_argument('--output-dir', help='Inno setup script output dir')
 
     # find, graph, list, inno-script
-    parser.add_argument('-o','--output', help='Path to save dependency tree or graph')
+    parser.add_argument('-o','--output', help='Path to save file')
     # tree
-    parser.add_argument("--no-repeat", action='store_true')
+    parser.add_argument("--no-repeat", action='store_true', help='Print each dll once')
 
     args, extraArgs = parser.parse_known_args()
 
