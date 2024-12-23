@@ -693,10 +693,6 @@ def args_to_config(args) -> Config:
     for n in ['name', 'version', 'output', 'output_dir', 'src', 'dst', 'dry_run', 'ace', 'no_repeat', 'zip', 'unix_dirs']:
         setattr(config, n, getattr(args, n))
 
-    if config.msys_root is None:
-        if os.path.isdir("C:\\msys64"):
-            config.msys_root = "C:\\msys64"
-
     for n in ['data', 'bin', 'plugins', 'plugins_path']:
         items = paths_and_globs(getattr(args, n))
         setattr(config, n, items)
