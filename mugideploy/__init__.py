@@ -179,6 +179,20 @@ class Logger():
     def multiple_candidates(self, name, items):
         print(Fore.MAGENTA + "Multiple candidates for " + name + "\n" + Fore.MAGENTA + Style.BRIGHT + "\n".join(items) + Fore.RESET + Style.NORMAL + "\n", file=sys.stderr)
 
+class MutedLogger():
+    def print_info(self, msg):
+        pass
+    def print_error(self, msg):
+        pass
+    def print_copied(self, src, dst):
+        pass
+    def flush_copied(self):
+        pass
+    def print_writen(self, path):
+        pass
+    def multiple_candidates(self, name, items):
+        pass
+
 class JSONEncoder(json.JSONEncoder):
     def default(self, obj):
         return obj.__dict__    
@@ -1363,8 +1377,7 @@ def main():
     # https://en.wikipedia.org/wiki/Access_Database_Engine
     # ace14 https://download.microsoft.com/download/3/5/C/35C84C36-661A-44E6-9324-8786B8DBE231/accessdatabaseengine_X64.exe
 
-    #parser.add_argument('--msys-root', help='Msys root')
-    #parser.add_argument('--msystem', choices=MSYSTEMS, help='Msystem')
+    parser.add_argument("-q", "--quiet", action='store_true', help='Do not print additional info')
     parser.add_argument('--unix-dirs', action='store_true', help='bin var etc dirs')
 
     parser.add_argument('--src', help='Path to sources')
@@ -1385,7 +1398,10 @@ def main():
         clear_cache()
         return
 
-    logger = Logger()
+    if args.quiet:
+        logger = MutedLogger()
+    else:
+        logger = Logger()
 
     debug_print(args)
     for arg in extraArgs:

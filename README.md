@@ -32,6 +32,7 @@ options:
   --system                                        Include system dlls
   --vcruntime                                     Include vcruntime dlls
   --msapi                                         Include msapi dlls
+  -q, --quiet                                     Do not print additional info
   --unix-dirs                                     bin var etc dirs
   --src SRC                                       Path to sources
   --version-header VERSION_HEADER                 Path to version header
@@ -56,6 +57,7 @@ options:
   --system                                        Include system dlls
   --vcruntime                                     Include vcruntime dlls
   --msapi                                         Include msapi dlls
+  -q, --quiet                                     Do not print additional info
   --dry-run                                       Do not copy files
 ```
 
@@ -75,6 +77,7 @@ options:
   --system                                        Include system dlls
   --vcruntime                                     Include vcruntime dlls
   --msapi                                         Include msapi dlls
+  -q, --quiet                                     Do not print additional info
   --output-dir OUTPUT_DIR                         Inno setup script output dir
   -o OUTPUT, --output OUTPUT                      Path to save file
 ```
@@ -109,6 +112,7 @@ options:
   --system                                        Include system dlls
   --vcruntime                                     Include vcruntime dlls
   --msapi                                         Include msapi dlls
+  -q, --quiet                                     Do not print additional info
   -o OUTPUT, --output OUTPUT                      Path to save file
   --no-repeat                                     Print each dll once (tree)
 ```
