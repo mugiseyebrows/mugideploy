@@ -22,6 +22,8 @@ import functools
 import contextlib
 from typing import Any
 
+# set DEBUG_MUGIDEPLOY=1
+
 def load_json(path):
     with open(path, encoding='utf-8') as f:
         return json.load(f)
@@ -106,7 +108,6 @@ def get_setup_files(base_path: str, appname: str) -> list[tuple[str, list[int], 
     files.sort(key=functools.cmp_to_key(cmp_setup_file))
     return files
 
-
 def fourints(v):
     cols = v.split('.')
     while len(cols) < 4:
@@ -130,16 +131,6 @@ def update_header(header_path, version):
             elif n == 'APP_VERSION_INT':
                 lines[i] = '#define APP_VERSION_INT {}\n'.format(fourints(version))
     save_text(header_path, ''.join(lines))
-
-#MSYSTEMS = ['MINGW32', 'MINGW64', 'UCRT64', 'CLANG64', 'MSYS2']
-
-def debug_print_on(*args):
-    print(*args)
-
-def debug_print_off(*args):
-    pass
-
-# set DEBUG_MUGIDEPLOY=1
 
 if os.environ.get('DEBUG_MUGIDEPLOY') == "1":
     debug_print = lambda *args, **kwargs: print(*args, **kwargs, file=sys.stderr)
@@ -270,7 +261,6 @@ class Resolver:
         for name, items in binaries.items():
             binaries[name] = unique_case_insensitive(items)
         self._binaries = binaries
-        #self._msys_root = msys_root
     
     def resolve(self, name, logger):
         name_ = name.lower()
@@ -281,23 +271,7 @@ class Resolver:
                 raise ValueError("{} cannot be found".format(name))
         items = self._binaries[name_]
         if len(items) > 1:
-            """
-            msys_root = self._msys_root
-            if msys_root is not None:
-                
-                items_ = [item for item in items if is_child_path(item, msys_root)]
-
-                #debug_print('filtered', items, items_)
-                if len(items_) > 1:
-                    logger.multiple_candidates(name, items_)
-                elif len(items_) == 1:
-                    return items_[0]
-                else:
-                    #debug_print('{} not found in {}'.format(name_, msys_root))
-                    pass
-            """
             logger.multiple_candidates(name, items)
-            #print("multiple choises for {}:\n{}\n".format(name, "\n".join(items)))
         if len(items) < 1:
             raise ValueError("cannot resolve {}".format(name))
 
@@ -324,14 +298,10 @@ def get_dependencies(path):
     pe = pefile.PE(path, fast_load=True)
     pe.parse_data_directories(import_dllnames_only=True)
 
-    #debug_print('pefile for {}'.format(path))
-
     if not hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
-        #print('{} has no DIRECTORY_ENTRY_IMPORT'.format(path))
         return []
     else:
         res = [name for name in [item.dll.decode('utf-8') for item in pe.DIRECTORY_ENTRY_IMPORT] if name.lower().endswith('.dll')]
-        #print("get_dependencies", path, res)
         return res
 
 class PEReader:
@@ -561,16 +531,6 @@ class PluginsCollection:
         return res
 
 
-
-
-"""
-sys.path.insert(0, os.getcwd())
-try:
-    from version import main as version_main
-except ImportError as e:
-    pass
-"""
-
 def makedirs(path):
     os.makedirs(path, exist_ok=True)
 
@@ -590,9 +550,6 @@ def read_json(path):
             return json.load(f)
     except FileNotFoundError:
         return None
-
-
-#print(args); exit(0)
 
 def write_qt_conf(path):
     base = os.path.dirname(path)
@@ -706,23 +663,6 @@ def args_to_config(args) -> Config:
 
     debug_print('plugins-path', config.plugins_path)
 
-    if len(config.bin) > 0:
-        first_bin = os.path.realpath(config.bin[0]).lower()
-        """
-        if config.msys_root is None:
-            if first_bin.startswith('c:\\msys64'):
-                config.msys_root = 'C:\\msys64'
-        """
-        """
-        if config.msystem is None and config.msys_root is not None:
-            for msystem in MSYSTEMS:
-                path = os.path.join(config.msys_root, msystem).lower()
-                #debug_print('path',path)
-                if first_bin.startswith(path):
-                    config.msystem = msystem
-                    break
-        """
-
     return config
 
 def existing(paths):
@@ -779,13 +719,6 @@ def get_search_paths(config, binaries: list[Any]):
                 continue
             extra_paths.append(dirname(binary.path))
     search_paths = extra_paths + os.environ['PATH'].split(";")
-    """
-    if config.msystem:
-        extra_paths = [
-            os.path.join(config.msys_root, config.msystem.lower(), 'bin')
-        ]
-        search_paths += extra_paths
-    """
     return search_paths
 
 def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], ResolveMetaData, BinariesPool]:
@@ -1515,8 +1448,5 @@ def main():
 
         clear_cache()
 
-
 if __name__ == "__main__":
     main()
-
-
