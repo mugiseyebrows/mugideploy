@@ -85,7 +85,7 @@ options:
 ## Print info
 
 ```shell
-mugideploy list --bin Release\imgzip.exe --plugins imageformats 2> NUL
+mugideploy list --bin Release\imgzip.exe --plugins imageformats -q
 ```
 prints linked libraries as a list
 
@@ -95,7 +95,7 @@ mugideploy json --bin Release\imgzip.exe --plugins imageformats -o binaries.json
 prints linked libraries as a json
 
 ```shell
-mugideploy tree --no-repeat --bin Release\imgzip.exe --plugins imageformats 2> NUL
+mugideploy tree --no-repeat --bin Release\imgzip.exe --plugins imageformats -q
 ```
 prints linked libraries as a tree
 
