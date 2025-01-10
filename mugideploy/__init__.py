@@ -1219,16 +1219,16 @@ class Node:
 
 def copy_dep(config: Config, logger: Logger, binaries: list[Binary], meta, pool):
     dst = config.dst
+    binary: Binary
     for binary in binaries:
         file_dst = os.path.join(dst, binary.name)
+        if binary.isplugin:
+            continue
         if os.path.isfile(file_dst):
-            pass
-        else:
-            if config.dry_run:
-                pass
-            else:
-                shutil.copy(binary.path, file_dst)
-            logger.print_copied(binary.path, file_dst)
+            continue
+        if not config.dry_run:
+            shutil.copy(binary.path, file_dst)
+        logger.print_copied(binary.path, file_dst)
     logger.flush_copied("Source", "Destination", os.path.isabs(dst))
 
 def print_tree(config: Config, binaries: list[Binary], meta, pool):
