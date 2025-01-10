@@ -20,6 +20,7 @@ import sys
 import itertools
 import functools
 import contextlib
+import datetime
 from typing import Any
 
 # set DEBUG_MUGIDEPLOY=1
@@ -140,23 +141,49 @@ else:
 def noext_basename(path):
     return os.path.splitext(os.path.basename(path))[0]
 
-class Logger():
-
-    def __init__(self):
+class BaseLogger():
+    def __init__(self, cmd):
+        self._cmd = cmd
         self._src = []
         self._dst = []
+
+    def print_copied(self, src, dst):
+        self._src.append(src)
+        self._dst.append(dst)
+
+    def flush_copied(self, src_label = "Sources", dst_label = "Collected", abspath = False):
+        now = datetime.datetime.now()
+        path = os.path.join(os.getcwd(), 'mugideploy.log')
+        with open(path, 'a', encoding='utf-8') as f:
+            print('# ' + now.strftime('%Y-%m-%d %H:%M:%S'), file=f)
+            print('# ' + self._cmd, file=f)
+            for src, dst in zip(self._src, self._dst):
+                print(f"{src} -> {dst}", file=f)
+        self._src = []
+        self._dst = []
+
+    def print_info(self, msg):
+        pass
+
+    def print_error(self, msg):
+        pass
+
+    def print_writen(self, path):
+        pass
+
+    def multiple_candidates(self, name, items):
+        pass
+
+class Logger(BaseLogger):
+
+    def __init__(self, cmd):
+        super().__init__(cmd)
 
     def print_info(self, msg):
         print(Fore.YELLOW + Style.BRIGHT + msg + Fore.RESET + Style.NORMAL, file=sys.stderr)
 
     def print_error(self, msg):
         print(Fore.RED + Style.BRIGHT + msg + Fore.RESET, file=sys.stderr)
-
-    def print_copied(self, src, dst):
-        if src is not None:
-            self._src.append(src)
-        if dst is not None:
-            self._dst.append(dst)
 
     def flush_copied(self, src_label = "Sources", dst_label = "Collected", abspath = False):
         print("\n" + src_label, file=sys.stderr)
@@ -170,8 +197,7 @@ class Logger():
             getpath = lambda item: os.path.relpath(item, cwd)
         for item in self._dst:
             print(Fore.GREEN + Style.BRIGHT + getpath(item) + Fore.RESET + Style.NORMAL, file=sys.stderr)
-        self._src = []
-        self._dst = []
+        super().flush_copied(src_label, dst_label, abspath)
 
     def print_writen(self, path):
         print(Fore.YELLOW + Style.BRIGHT + path + Fore.RESET + Style.NORMAL + " writen", file=sys.stderr)
@@ -179,19 +205,9 @@ class Logger():
     def multiple_candidates(self, name, items):
         print(Fore.MAGENTA + "Multiple candidates for " + name + "\n" + Fore.MAGENTA + Style.BRIGHT + "\n".join(items) + Fore.RESET + Style.NORMAL + "\n", file=sys.stderr)
 
-class MutedLogger():
-    def print_info(self, msg):
-        pass
-    def print_error(self, msg):
-        pass
-    def print_copied(self, src, dst):
-        pass
-    def flush_copied(self):
-        pass
-    def print_writen(self, path):
-        pass
-    def multiple_candidates(self, name, items):
-        pass
+class MutedLogger(BaseLogger):
+    def __init__(self, cmd):
+        super().__init__(cmd)
 
 class JSONEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -1067,8 +1083,8 @@ def collect(config: Config, logger: Logger, binaries, meta: ResolveMetaData, poo
     if meta.qt:
         if not dry_run:
             write_qt_conf(qt_conf_path)
-        logger.print_copied(None, qt_conf_path)
-            
+        logger.print_copied('<generated>', qt_conf_path)
+
     #print(binaries)
 
     for binary in binaries:
@@ -1398,10 +1414,11 @@ def main():
         clear_cache()
         return
 
+    cmd = ' '.join([f'"{v}"' if ' ' in v else v for v in sys.argv])
     if args.quiet:
-        logger = MutedLogger()
+        logger = MutedLogger(cmd)
     else:
-        logger = Logger()
+        logger = Logger(cmd)
 
     debug_print(args)
     for arg in extraArgs:
