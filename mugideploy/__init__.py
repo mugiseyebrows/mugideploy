@@ -853,7 +853,7 @@ class InnoScript(dict):
                 res.append("{}: {}".format(k,v_))
             return "; ".join(res)
 
-        with open_(path, 'w', encoding='CP1251') as f:
+        with open_(path, 'w', encoding='utf-8') as f:
             for section, lines in self.items():
                 if len(lines) == 0:
                     continue
