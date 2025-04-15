@@ -384,6 +384,13 @@ class BinariesPool:
                 pool.append(path)
 
         skip_list = set(['msvcp140.dll','msvcr90.dll'])
+
+        def contains(pool: list[Binary], name: str):
+            name = name.lower()
+            for binary in pool:
+                if binary.name.lower() == name:
+                    return True
+            return False
         
         reader = PEReader()
         i = 0
@@ -401,9 +408,9 @@ class BinariesPool:
                     if name.lower().startswith('vcruntime'):
                         vcruntime = True
                 item.dependencies = [name for name in dependencies if name.lower() not in skip_list]
-                for dll in item.dependencies:
-                    if not any(map(lambda item: item.name.lower() == dll.lower(), pool)):
-                        pool.append(Binary(dll))
+                for name in item.dependencies:
+                    if not contains(pool, name):
+                        pool.append(Binary(name))
             i += 1
         self._pool = pool
         self._vcruntime = vcruntime
