@@ -396,10 +396,11 @@ class BinariesPool:
                     item.dependencies = []
                     continue
                 dependencies = reader.get_dependencies(item.path)
-                for dep in dependencies:
-                    if dep.lower().startswith('vcruntime'):
+                debug_print(f'{item.path} dependencies {dependencies}')
+                for name in dependencies:
+                    if name.lower().startswith('vcruntime'):
                         vcruntime = True
-                item.dependencies = [dep for dep in dependencies if dep.lower() not in skip_list]
+                item.dependencies = [name for name in dependencies if name.lower() not in skip_list]
                 for dll in item.dependencies:
                     if not any(map(lambda item: item.name.lower() == dll.lower(), pool)):
                         pool.append(Binary(dll))
