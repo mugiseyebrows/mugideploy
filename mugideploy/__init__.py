@@ -191,10 +191,15 @@ class Logger(BaseLogger):
             print(Fore.GREEN + Style.BRIGHT + item + Fore.RESET + Style.NORMAL, file=sys.stderr)
         print("\n" + dst_label, file=sys.stderr)
         cwd = os.getcwd()
+        def relpath(path1, path2):
+            try:
+                return os.path.relpath(path1, path2)
+            except ValueError:
+                return path1
         if abspath:
             getpath = lambda item: item
         else:
-            getpath = lambda item: os.path.relpath(item, cwd)
+            getpath = lambda item: relpath(item, cwd)
         for item in self._dst:
             print(Fore.GREEN + Style.BRIGHT + getpath(item) + Fore.RESET + Style.NORMAL, file=sys.stderr)
         super().flush_copied(src_label, dst_label, abspath)
