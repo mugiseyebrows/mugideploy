@@ -1360,6 +1360,9 @@ def parse_header(header_path):
             if n == 'APP_VERSION':
                 version = v.strip().replace('"', '')
                 return version
+            elif n == 'VERSION':
+                version = v.strip().replace('"', '')
+                return version
 
 def parse_header_for_version(config):
     cwd = os.getcwd()
