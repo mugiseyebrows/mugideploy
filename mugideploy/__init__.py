@@ -351,8 +351,8 @@ class PEReader:
             with open(path) as f:
                 self._cache = json.load(f)
         
-
-    def get_dependencies(self, path):
+    def get_dependencies(self, path) -> list[str]:
+        path = os.path.abspath(path)
         cache = self._cache
         mtime = os.path.getmtime(path)
         if path in cache and mtime <= cache[path]["mtime"]:
