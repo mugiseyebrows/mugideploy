@@ -191,10 +191,15 @@ class Logger(BaseLogger):
             print(Fore.GREEN + Style.BRIGHT + item + Fore.RESET + Style.NORMAL, file=sys.stderr)
         print("\n" + dst_label, file=sys.stderr)
         cwd = os.getcwd()
+        def relpath(path1, path2):
+            try:
+                return os.path.relpath(path1, path2)
+            except ValueError:
+                return path1
         if abspath:
             getpath = lambda item: item
         else:
-            getpath = lambda item: os.path.relpath(item, cwd)
+            getpath = lambda item: relpath(item, cwd)
         for item in self._dst:
             print(Fore.GREEN + Style.BRIGHT + getpath(item) + Fore.RESET + Style.NORMAL, file=sys.stderr)
         super().flush_copied(src_label, dst_label, abspath)
@@ -346,8 +351,8 @@ class PEReader:
             with open(path) as f:
                 self._cache = json.load(f)
         
-
-    def get_dependencies(self, path):
+    def get_dependencies(self, path) -> list[str]:
+        path = os.path.abspath(path)
         cache = self._cache
         mtime = os.path.getmtime(path)
         if path in cache and mtime <= cache[path]["mtime"]:
@@ -379,6 +384,13 @@ class BinariesPool:
                 pool.append(path)
 
         skip_list = set(['msvcp140.dll','msvcr90.dll'])
+
+        def contains(pool: list[Binary], name: str):
+            name = name.lower()
+            for binary in pool:
+                if binary.name.lower() == name:
+                    return True
+            return False
         
         reader = PEReader()
         i = 0
@@ -391,13 +403,14 @@ class BinariesPool:
                     item.dependencies = []
                     continue
                 dependencies = reader.get_dependencies(item.path)
-                for dep in dependencies:
-                    if dep.lower().startswith('vcruntime'):
+                debug_print(f'{item.path} dependencies {dependencies}')
+                for name in dependencies:
+                    if name.lower().startswith('vcruntime'):
                         vcruntime = True
-                item.dependencies = [dep for dep in dependencies if dep.lower() not in skip_list]
-                for dll in item.dependencies:
-                    if not any(map(lambda item: item.name.lower() == dll.lower(), pool)):
-                        pool.append(Binary(dll))
+                item.dependencies = [name for name in dependencies if name.lower() not in skip_list]
+                for name in item.dependencies:
+                    if not contains(pool, name):
+                        pool.append(Binary(name))
             i += 1
         self._pool = pool
         self._vcruntime = vcruntime
@@ -1347,6 +1360,9 @@ def parse_header(header_path):
             n = m.group(1)
             v = m.group(2)
             if n == 'APP_VERSION':
+                version = v.strip().replace('"', '')
+                return version
+            elif n == 'VERSION':
                 version = v.strip().replace('"', '')
                 return version
 
