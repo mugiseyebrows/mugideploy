@@ -1028,8 +1028,10 @@ def collect(config: Config, logger: Logger, binaries, meta: ResolveMetaData, poo
 
     if meta.gtk or config.unix_dirs:
         base_bin = os.path.join(base, 'bin')
+        base_data = os.path.join(base, 'share')
     else:
         base_bin = base
+        base_data = base
 
     def shutil_copy(src, dst, verbose = True):
         #print("shutil_copy", src, dst)
@@ -1103,7 +1105,7 @@ def collect(config: Config, logger: Logger, binaries, meta: ResolveMetaData, poo
         shutil_copy(binary.path, dest)
 
     for path in config.data:
-        dest = os.path.join(base, os.path.basename(path))
+        dest = os.path.join(base_data, os.path.basename(path))
         shutil_copy(path, dest)
 
     if meta.vcruntime and config.vcruntime:
