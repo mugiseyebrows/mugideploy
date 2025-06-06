@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="mugideploy",
-    version="0.0.28",
+    version="0.0.29",
     author="Doronin Stanislav",
     author_email="mugisbrows@gmail.com",
     url='https://github.com/mugiseyebrows/mugideploy',
@@ -17,7 +17,6 @@ setuptools.setup(
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
     ],
     entry_points={
         'console_scripts': [
