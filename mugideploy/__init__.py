@@ -22,6 +22,7 @@ import functools
 import contextlib
 import datetime
 from typing import Any
+import fnmatch
 
 # set DEBUG_MUGIDEPLOY=1
 
@@ -67,6 +68,10 @@ class Config:
     plugins: list[Any] = field(default_factory=list)
     plugins_path: list[Any] = field(default_factory=list)
     data: list[Any] = field(default_factory=list)
+    datax: list[Any] = field(default_factory=list)
+    msys_data: list[Any] = field(default_factory=list)
+    msys_datax: list[Any] = field(default_factory=list)
+    msys_base: str = None
     src: str = None
     version_header: str = None
     vcredist: str = None
@@ -278,7 +283,7 @@ def unique_case_insensitive(paths):
     return res
 
 class Resolver:
-    def __init__(self, paths, exts):
+    def __init__(self, paths, exts, msys2 = False):
         binaries = defaultdict(list)
         paths_ = unique_case_insensitive(paths)
         for path in paths_:
@@ -296,6 +301,7 @@ class Resolver:
         for name, items in binaries.items():
             binaries[name] = unique_case_insensitive(items)
         self._binaries = binaries
+        self._msys2 = msys2
     
     def resolve(self, name, logger):
         name_ = name.lower()
@@ -309,7 +315,10 @@ class Resolver:
             logger.multiple_candidates(name, items)
         if len(items) < 1:
             raise ValueError("cannot resolve {}".format(name))
-
+        if self._msys2:
+            for item in items:
+                if 'msys64' in item:
+                    return item
         return items[0]
 
 def makedirs(path):
@@ -415,7 +424,7 @@ class BinariesPool:
         self._pool = pool
         self._vcruntime = vcruntime
 
-        def is_system(name):
+        def is_system(name: str):
             name = name.lower()
             if name.startswith('vcruntime'):
                 return False
@@ -424,6 +433,8 @@ class BinariesPool:
             if name.startswith('libcrypto'):
                 return False
             if name.startswith('api-ms'):
+                return False
+            if name.startswith('vulkan'):
                 return False
             return True
 
@@ -697,6 +708,11 @@ def args_to_config(args) -> Config:
         items = paths_and_globs(getattr(args, n))
         setattr(config, n, items)
 
+    config.datax = args.datax
+    config.msys_data = args.msys_data
+    config.msys_datax = args.msys_datax
+    config.msys_base = args.msys_base
+
     if config.name is None:
         if len(config.bin) > 0:
             config.name = os.path.splitext(os.path.basename(config.bin[0]))[0]
@@ -704,7 +720,9 @@ def args_to_config(args) -> Config:
     for path in query_plugins_path():
         config.plugins_path.append(path)
 
-    debug_print('plugins-path', config.plugins_path)
+    #debug_print('plugins-path', config.plugins_path)
+
+    #debug_print('config.datax', config.datax)
 
     return config
 
@@ -746,6 +764,7 @@ class ResolveMetaData:
     gtk: bool
     qt_gui: bool
     vcruntime: bool
+    msys2: bool
 
 def get_search_paths(config, binaries: list[Any]):
     extra_paths = []
@@ -771,12 +790,14 @@ def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], Reso
 
     logger.print_info("Resolving imports\n")
 
-    first_bin = config.bin[0]
+    first_bin: str = config.bin[0]
 
     if not os.path.isfile(first_bin):
         search_paths = get_search_paths(config, config.bin)
         resolver = Resolver(search_paths, ['.dll', '.exe'])
         first_bin = resolver.resolve(first_bin, logger)
+
+    is_msys2 = 'msys64' in first_bin.lower()
 
     dependencies = [e.lower() for e in get_dependencies(first_bin)]
 
@@ -834,11 +855,11 @@ def resolve_binaries(config: Config, logger: Logger) -> tuple[list[Binary], Reso
 
     search_paths = get_search_paths(config, binaries)
 
-    resolver = Resolver(search_paths, ['.dll', '.exe'])
+    resolver = Resolver(search_paths, ['.dll', '.exe'], msys2=is_msys2)
 
     pool = BinariesPool(binaries, resolver, config, logger)
 
-    meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt6=is_qt6, qt_gui=is_qt_gui, qt_debug=is_qt_debug, vcruntime=pool.vcruntime(), gtk=is_gtk)
+    meta = ResolveMetaData(amd64=is_amd64, qt=is_qt, qt4=is_qt4, qt5=is_qt5, qt6=is_qt6, qt_gui=is_qt_gui, qt_debug=is_qt_debug, vcruntime=pool.vcruntime(), gtk=is_gtk, msys2=is_msys2)
     
     return pool.binaries(binaries, config.system, config.msapi, config.vcruntime), meta, pool
 
@@ -1101,9 +1122,12 @@ def collect(config: Config, logger: Logger, binaries, meta: ResolveMetaData, poo
     #print(binaries)
 
     for binary in binaries:
-
+        """
+        if binary.name.startswith('v'):
+            print(binary.name)
+        """
         if binary.path is None:
-            #print("skip", b.name)
+            #print("binary.path is None", binary.name)
             continue
 
         if binary.dest is None:
@@ -1112,7 +1136,11 @@ def collect(config: Config, logger: Logger, binaries, meta: ResolveMetaData, poo
             dest = os.path.join(base_bin, binary.dest, os.path.basename(binary.path))
 
         makedirs(os.path.dirname(dest))
-
+        
+        """
+        if binary.name.startswith('v'):
+            print("copy", binary.path, dest)
+        """
         shutil_copy(binary.path, dest)
 
     for path in config.data:
@@ -1125,6 +1153,75 @@ def collect(config: Config, logger: Logger, binaries, meta: ResolveMetaData, poo
 
     #debug_print("meta.gtk", meta.gtk)
 
+    if config.datax:
+        for src_, dst_, pattern in config.datax:
+            if pattern == '*':
+                dst_path = os.path.join(base, dst_)
+                src_path = src_
+                if os.path.isdir(src_):
+                    #print("copy dir", src_path, dst_path)
+                    copy_tree(src_path, dst_path)
+                else:
+                    #print("copy file", src_path, dst_path)
+                    makedirs(os.path.dirname(dst_path))
+                    shutil_copy(src_path, dst_path)
+            else:
+                for root, dirs, files in os.walk(src_):
+                    for name in dirs:
+                        if fnmatch.fnmatch(name, pattern):
+                            src_path = os.path.join(root, name)
+                            dst_path = os.path.join(base, dst_, os.path.relpath(os.path.join(root, name), src_))
+                            #print("copy dir", src_path, dst_path)
+                            copy_tree(src_path, dst_path)
+                    for name in files:
+                        if fnmatch.fnmatch(name, pattern):
+                            src_path = os.path.join(root, name)
+                            dst_path = os.path.join(base, dst_, os.path.relpath(os.path.join(root, name), src_))
+                            #print("copy file", src_path, dst_path)
+                            makedirs(os.path.dirname(dst_path))
+                            shutil_copy(src_path, dst_path)
+
+    
+    msys_base = config.msys_base
+
+    def msys_abs(path):
+        if not os.path.isabs(path):
+            return os.path.join(msys_base, path)
+        return path
+
+    def msys_rel(path):
+        return os.path.relpath(path, msys_base)
+
+    if config.msys_data:
+        for item in config.msys_data:
+            src_path = msys_abs(item)
+            dst_path = os.path.join(base, msys_rel(src_path))
+            if os.path.isdir(src_path):
+                copy_tree(src_path, dst_path)
+            else:
+                makedirs(os.path.dirname(dst_path))
+                shutil_copy(src_path, dst_path)
+
+    if config.msys_datax:
+        items = list(config.msys_datax)
+        while len(items) > 1:
+            path = items.pop(0)
+            pattern = items.pop(0)
+            path = msys_abs(path)
+            for root, dirs, files in os.walk(path):
+                for name in dirs:
+                    if fnmatch.fnmatch(name, pattern):
+                        src_path = os.path.join(root, name)
+                        dst_path = os.path.join(base, msys_rel(src_path))
+                        #print("copy dir", src_path, dst_path)
+                        copy_tree(src_path, dst_path)
+                for name in files:
+                    if fnmatch.fnmatch(name, pattern):
+                        src_path = os.path.join(root, name)
+                        dst_path = os.path.join(base, msys_rel(src_path))
+                        #print("copy file", src_path, dst_path)
+                        makedirs(os.path.dirname(dst_path))
+                        shutil_copy(src_path, dst_path)
     logger.flush_copied()
 
     return base
@@ -1394,6 +1491,12 @@ def main():
     
     parser.add_argument('--bin', nargs='+', help='Binaries (dlls, exes)')
     parser.add_argument('--data', nargs='+', help='Path to data dirs and files')
+    parser.add_argument('--datax', nargs=3, action='append')
+
+    parser.add_argument('--msys-base', default='C:\\msys64\\ucrt64')
+    parser.add_argument('--msys-data', nargs='+')
+    parser.add_argument('--msys-datax', nargs='+')
+
     parser.add_argument('--plugins', nargs='+', help='Plugin names')
     parser.add_argument('--plugins-path', nargs='+', help='Path to plugins')
 
@@ -1425,6 +1528,8 @@ def main():
     parser.add_argument("--no-repeat", action='store_true', help='Print each dll once')
 
     args, extraArgs = parser.parse_known_args()
+
+    #print(args); exit(0)
 
     if args.command == 'clear-cache':
         clear_cache()
